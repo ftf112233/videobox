@@ -43,9 +43,26 @@ class FunctionWorker(QRunnable):
             result = self.fn(*self.args, **self.kwargs)
         except Exception as exc:  # noqa: BLE001 - 线程里的异常必须自己兜住，否则静默消失
             log.error("后台任务失败：%s\n%s", exc, traceback.format_exc())
-            self.signals.failed.emit(str(exc))
+            self._emit(self.signals.failed, str(exc))
             return
-        self.signals.finished.emit(result)
+        self._emit(self.signals.finished, result)
+
+    @staticmethod
+    def _emit(signal, value) -> None:
+        """发结果时接收方可能已经没了。
+
+        典型场景：程序刚启动、环境探测还在跑（要实测两个编码器，约 1 秒），
+        用户已经点了关闭。这时窗口和它的信号对象都被销毁，emit 会抛
+        `RuntimeError: Signal source has been deleted`，并被 Qt 打印成
+        "Error calling Python override of QRunnable::run()"。
+
+        结果来得太晚不是错误，丢掉即可——但绝不能让它冒到 Qt 层，
+        否则 `--noconsole` 打包后用户只会看到程序"安静地出了点事"。
+        """
+        try:
+            signal.emit(value)
+        except RuntimeError:
+            log.debug("后台任务完成时窗口已销毁，结果丢弃")
 
 
 def submit(fn: Callable, *args, on_done=None, on_error=None, **kwargs) -> FunctionWorker:

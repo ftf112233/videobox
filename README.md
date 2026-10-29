@@ -26,7 +26,7 @@
 | 4 | 生成会话总结 md，记录决策与反馈 | [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md)（开发过程）、[`docs/DECISIONS.md`](docs/DECISIONS.md)（技术选型取舍） | `docs/` |
 | 5 | 提交 GitHub | 本仓库 | — |
 | 6 | 界面选型须与"客户端"相关 | 原生 Qt Widgets（6.12），全仓无网页嵌入；菜单栏 / 状态栏 / 原生文件对话框 / 拖放高亮 / 窗口状态记忆 / 任务栏进度，打包成独立 exe | `videobox/ui/` [`DECISIONS.md §9`](docs/DECISIONS.md) |
-| 7 | 目标是给人用，要测试 | 50 个单元测试 + 无人值守 E2E 脚本 + 干净环境双击验证 + [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) 主动交代短板 | `tests/` `scripts/` |
+| 7 | 目标是给人用，要测试 | 54 个单元测试 + 无人值守 E2E 脚本 + 干净环境双击验证 + [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) 主动交代短板 | `tests/` `scripts/` |
 
 ## 二、快速开始
 
@@ -129,7 +129,7 @@ videobox/
 ## 六、测试
 
 ```bash
-# 单元测试：50 个，纯函数，秒级完成
+# 单元测试：54 个，纯函数，秒级完成
 python -m unittest discover -s tests -t . -v
 
 # 无界面冒烟：probe → params → QProcess 全链路真转码
