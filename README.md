@@ -25,7 +25,7 @@
 | 3 | 自行做一些优化 | 4 项，全部可量化（见下文「优化」） | — |
 | 4 | 生成会话总结 md，记录决策与反馈 | [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md)（开发过程）、[`docs/DECISIONS.md`](docs/DECISIONS.md)（技术选型取舍） | `docs/` |
 | 5 | 提交 GitHub | 本仓库 | — |
-| 6 | 界面选型须与"客户端"相关 | 原生 Qt Widgets 桌面程序，打包成独立 `.exe`，非网页套壳 | `videobox/ui/` |
+| 6 | 界面选型须与"客户端"相关 | 原生 Qt Widgets（6.12），全仓无网页嵌入；菜单栏 / 状态栏 / 原生文件对话框 / 拖放高亮 / 窗口状态记忆 / 任务栏进度，打包成独立 exe | `videobox/ui/` [`DECISIONS.md §9`](docs/DECISIONS.md) |
 | 7 | 目标是给人用，要测试 | 50 个单元测试 + 无人值守 E2E 脚本 + 干净环境双击验证 + [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) 主动交代短板 | `tests/` `scripts/` |
 
 ## 二、快速开始

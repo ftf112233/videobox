@@ -14,6 +14,7 @@ import traceback
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .infra.logging_setup import setup_logging
@@ -22,7 +23,7 @@ from .ui.main_window import MainWindow
 log = logging.getLogger(__name__)
 
 APP_NAME = "VideoBox"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 
 def _resource_path(relative: str) -> Path:
@@ -46,6 +47,19 @@ def load_stylesheet(app: QApplication) -> None:
         app.setStyleSheet(qss.read_text(encoding="utf-8"))
     except OSError:
         log.warning("样式表未找到：%s（将使用 Qt 默认外观）", qss)
+
+
+def load_icon(app: QApplication) -> None:
+    """应用级图标。窗口没单独设图标时会继承它，连消息框、任务栏也一起生效。"""
+    ico = _resource_path("ui/app.ico")
+    if not ico.exists():
+        log.warning("图标未找到：%s", ico)
+        return
+    icon = QIcon(str(ico))
+    if icon.isNull():
+        log.warning("图标文件无法解析：%s", ico)
+        return
+    app.setWindowIcon(icon)
 
 
 def install_excepthook(app: QApplication) -> None:
@@ -82,6 +96,7 @@ def main() -> int:
     app.setApplicationVersion(APP_VERSION)
 
     load_stylesheet(app)
+    load_icon(app)
     install_excepthook(app)
 
     window = MainWindow()

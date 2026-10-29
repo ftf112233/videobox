@@ -68,6 +68,28 @@ class InfoPanel(QFrame):
         root.addStretch(1)
 
     # ---------- 对外接口 ----------
+    def set_drag_active(self, active: bool) -> None:
+        """拖拽悬停时给视觉反馈。
+
+        不做这一步的话，用户拖着文件停在窗口上方，界面毫无反应——
+        他不知道能不能放、该放哪里，只能凭猜。这是"能感知"和"能猜"的区别。
+        """
+        if active:
+            self.thumb.setStyleSheet(
+                "background: #EAF1FE; border: 2px dashed #2F6FED;"
+                " border-radius: 8px; color: #2F6FED; font-size: 14px;"
+            )
+            self.thumb.setText("松开鼠标即可载入")
+            return
+
+        if self.thumb.pixmap().isNull():
+            self.thumb.setStyleSheet("")
+            self.thumb.setText("拖一个视频到这里\n或点击「打开文件」")
+        else:
+            self.thumb.setStyleSheet(
+                "background: #000; border: 1px solid #E5E6EB; border-radius: 8px;"
+            )
+
     def show_info(self, info: VideoInfo) -> None:
         from pathlib import Path
 

@@ -56,13 +56,22 @@ def main() -> int:
     if not check_vendor():
         return 1
 
+    ico = ROOT / "videobox" / "ui" / "app.ico"
+    if not ico.is_file():
+        print("! 没有 app.ico，先跑 python scripts/make_icon.py")
+
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
         "--windowed", "--onedir", "--name", "VideoBox",
         "--add-data", "videobox/ui/style.qss;videobox/ui",
+        "--add-data", "videobox/ui/app.ico;videobox/ui",
         "--add-binary", "vendor/ffmpeg.exe;resources/ffmpeg",
     ]
+    # 这个 --icon 决定 exe 在资源管理器里长什么样；
+    # 不设的话任务栏和文件列表都是通用空白图标
+    if ico.is_file():
+        cmd += ["--icon", str(ico)]
     if (VENDOR / "ffprobe.exe").is_file():
         cmd += ["--add-binary", "vendor/ffprobe.exe;resources/ffmpeg"]
     for module in EXCLUDES:

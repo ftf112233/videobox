@@ -15,8 +15,10 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QImage
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QIcon, QImage,
+)
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout,
     QWidget,
@@ -34,6 +36,7 @@ from ..infra.ffmpeg_bin import (
 from ..infra.llm_client import LLMClient
 from ..infra.logging_setup import app_data_dir, log_dir
 from ..infra.process import TranscodeRunner
+from ..infra import taskbar as taskbar_mod
 from . import tasks
 from .widgets.advisor_panel import AdvisorPanel
 from .widgets.info_panel import InfoPanel
@@ -47,6 +50,10 @@ VIDEO_SUFFIXES = {
 }
 
 CONFIG_PATH = app_data_dir() / "config.json"
+
+DEFAULT_TITLE = "VideoBox · AI 视频转码器"
+MIN_SIZE = (1000, 660)
+DEFAULT_SIZE = (1180, 760)
 
 
 def load_config() -> dict:
@@ -69,9 +76,16 @@ def resolve_api_key(cfg: dict) -> str:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VideoBox · AI 视频转码器")
-        self.resize(1180, 760)
+        self.setWindowTitle(DEFAULT_TITLE)
+        self.setMinimumSize(*MIN_SIZE)
+        self.resize(*DEFAULT_SIZE)
         self.setAcceptDrops(True)
+        self._apply_icon()
+
+        # 桌面程序该有的"记性"：窗口位置、上次目录、上次填的需求。
+        # 不记这些，用户每次打开都从零开始，就是"用不明白"的开始。
+        self.settings = QSettings("VideoBox", "VideoBox")
+        self._restore_window_state()
 
         self.binaries = Binaries(ffmpeg="", ffprobe=None, source="未探测")
         self.probes: list[CodecProbe] = []
@@ -81,6 +95,7 @@ class MainWindow(QMainWindow):
         self.runner: TranscodeRunner | None = None
         self.worker_refs: list = []
         self.retry_done = False
+        self.taskbar = taskbar_mod.TaskbarProgress()
 
         cfg = load_config()
         self.client = LLMClient(api_key=resolve_api_key(cfg))
@@ -88,7 +103,38 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menu()
+        self._restore_last_request()
         self._boot_environment()
+
+    # ================= 窗口状态 =================
+    def _apply_icon(self) -> None:
+        """窗口图标。不设的话 Windows 任务栏显示通用空白图标——最好认的未完成信号。"""
+        try:
+            from ..app import _resource_path
+
+            path = _resource_path("ui/app.ico")
+            if path.exists():
+                self.setWindowIcon(QIcon(str(path)))
+        except Exception as exc:  # noqa: BLE001 - 图标失败不该影响启动
+            log.debug("图标加载失败：%s", exc)
+
+    def _restore_window_state(self) -> None:
+        geo = self.settings.value("window/geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+            return
+        screen = self.screen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.move(
+                area.center().x() - DEFAULT_SIZE[0] // 2,
+                area.center().y() - DEFAULT_SIZE[1] // 2,
+            )
+
+    def _restore_last_request(self) -> None:
+        text = str(self.settings.value("session/last_request", "") or "")
+        if text:
+            self.advisor_panel.request_edit.setText(text)
 
     # ================= UI 组装 =================
     def _build_ui(self) -> None:
@@ -217,8 +263,9 @@ class MainWindow(QMainWindow):
 
     # ================= 打开文件 =================
     def _pick_file(self) -> None:
+        start = str(self.settings.value("paths/last_dir", "") or "")
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择视频文件", "",
+            self, "选择视频文件", start,
             "视频文件 (*.mp4 *.mkv *.mov *.avi *.flv *.wmv *.webm *.ts *.m4v *.3gp);;所有文件 (*.*)",
         )
         if path:
@@ -229,10 +276,16 @@ class MainWindow(QMainWindow):
             for url in event.mimeData().urls():
                 if Path(url.toLocalFile()).suffix.lower() in VIDEO_SUFFIXES:
                     event.acceptProposedAction()
+                    self.info_panel.set_drag_active(True)
                     return
         event.ignore()
 
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        self.info_panel.set_drag_active(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 - Qt 命名
+        self.info_panel.set_drag_active(False)
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             if Path(path).suffix.lower() in VIDEO_SUFFIXES:
@@ -245,6 +298,9 @@ class MainWindow(QMainWindow):
         if self.runner is not None:
             QMessageBox.information(self, "请稍等", "正在转码中，请先取消当前任务。")
             return
+
+        self.settings.setValue("paths/last_dir", str(Path(path).parent))
+        self.setWindowTitle(f"{Path(path).name} · VideoBox")
 
         self.info = None
         self.plan = None
@@ -389,6 +445,8 @@ class MainWindow(QMainWindow):
         codec_label = "CPU 软件编码" if codec == "libx264" else "NVIDIA 硬件编码"
         self.progress_panel.set_running(codec_label)
         self.status_label.setText(f"转码中… → {out_path}")
+        self.taskbar.set_state(int(self.winId()), taskbar_mod.STATE_NORMAL)
+        self.taskbar.set_value(int(self.winId()), 0)
 
         runner = TranscodeRunner(
             ffmpeg=self.binaries.ffmpeg,
@@ -410,12 +468,15 @@ class MainWindow(QMainWindow):
         self.progress_panel.update_progress(
             update.percent, format_eta(update.eta_sec), update.speed
         )
+        # 任务栏同步进度：窗口在后台时也能看见还剩多少
+        self.taskbar.set_value(int(self.winId()), update.percent)
 
     def _cancel_transcode(self) -> None:
         if self.runner:
             self.runner.cancel()
             self.progress_panel.cancel_btn.setEnabled(False)
             self.progress_panel.show_note("正在安全取消（等待 ffmpeg 收尾）…")
+            self.taskbar.set_state(int(self.winId()), taskbar_mod.STATE_PAUSED)
 
     def _on_transcode_finished(self, result) -> None:
         codec = result.used_codec
@@ -438,6 +499,7 @@ class MainWindow(QMainWindow):
         self.progress_panel.show_result(result, codec_label)
         if result.ok:
             self.status_label.setText(f"转码完成：{result.output_path}")
+            self.taskbar.clear()
             log.info(
                 "转码成功 %s → %s，耗时 %.2fs，%s",
                 result.input_size_bytes, result.output_size_bytes,
@@ -445,8 +507,11 @@ class MainWindow(QMainWindow):
             )
         elif result.cancelled:
             self.status_label.setText("已取消")
+            self.taskbar.clear()
         else:
             self.status_label.setText("转码失败，详见底部提示或日志")
+            # 任务栏变红：用户切到别的窗口也能知道这次跑挂了
+            self.taskbar.set_state(int(self.winId()), taskbar_mod.STATE_ERROR)
 
     def _open_output_dir(self) -> None:
         if not self.info:
@@ -455,6 +520,17 @@ class MainWindow(QMainWindow):
 
     # ================= 收尾 =================
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        # 记住窗口位置和这次填的需求，下次打开接着用
+        try:
+            self.settings.setValue("window/geometry", self.saveGeometry())
+            self.settings.setValue(
+                "session/last_request", self.advisor_panel.request_edit.text()
+            )
+            self.settings.sync()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("保存窗口状态失败：%s", exc)
+        self.taskbar.clear()
+
         if self.runner:
             self.runner.cancel()
         super().closeEvent(event)
