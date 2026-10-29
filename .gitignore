@@ -36,3 +36,6 @@ config.json
 .idea/
 .vscode/
 *.swp
+
+# 手工自测素材（体积大，不入库）
+手工自测/
