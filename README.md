@@ -3,6 +3,12 @@
 一个 Windows 桌面视频转码工具。用 PySide6（Qt for Python）做界面，用 FFmpeg 命令行做转码，
 并内置一个「AI 参数顾问」——你用一句人话描述用途，它给出可校验、可编辑的转码参数。
 
+![演示](docs/demo.gif)
+
+> 上面这段 GIF 不是录屏，是 `scripts/make_demo_gif.py` 在应用进程内按帧抓窗口、再交给 ffmpeg 合成的，
+> 所以每次跑都是同一套真流程：载入 → 探测 → 请求方案 → 转码 → 出结果。
+> 原速只有 4 秒多，为了看得清才放慢到 13 秒。
+
 ![主界面](docs/screenshots/03_advised.png)
 
 > 笔试要求：用 AI 做一个视频格式转换器，限时三天。本仓库是提交物。
@@ -85,6 +91,10 @@ python scripts/build.py
 另外有个不显眼但很实用的：**目标体积控制**。只给 `-b:v` 时 x264 在短视频上收敛不了
 （实测目标 20MB 出了 38MB），加上 `-maxrate` / `-bufsize` 后才压到 18MB。细节见 SESSION_LOG。
 
+转码完成后的界面（同一份文件，目标「发微信朋友圈，别超过 20MB」）：
+
+![转码完成](docs/screenshots/04_done.png)
+
 ## 五、架构
 
 分层的唯一目的是**让核心逻辑能脱离界面被测试**。
@@ -127,6 +137,9 @@ python scripts/smoke_transcode.py tests/fixtures/sample_720p.mp4 "压小一点�
 
 # 界面端到端（含自动截图）
 python scripts/e2e_ui.py tests/fixtures/demo_1080p.mp4 "发微信朋友圈，别超过20MB"
+
+# 录演示 GIF（进程内抓帧，不依赖录屏软件）
+python scripts/make_demo_gif.py tests/fixtures/demo_1080p.mp4
 ```
 
 单元测试覆盖的是**容易出隐性错误的地方**，不是凑数：
