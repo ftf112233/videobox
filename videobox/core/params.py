@@ -63,6 +63,21 @@ def resolve_scale(plan: TranscodePlan, info: VideoInfo) -> int | None:
     return target
 
 
+def _rotation_filters(degrees: int) -> list[str]:
+    """把「顺时针多少度」翻译成 ffmpeg 滤镜。
+
+    用 transpose 而不是 -display_rotation：前者真的把像素转过去，
+    在任何播放器里都一致；后者只改容器里的元数据，播放器不认就白改。
+    """
+    if degrees == 90:
+        return ["transpose=1"]       # 顺时针 90°
+    if degrees == 180:
+        return ["hflip", "vflip"]    # 转两次不如直接翻，少一次重采样
+    if degrees == 270:
+        return ["transpose=2"]       # 逆时针 90°
+    return []
+
+
 def build_video_args(
     plan: TranscodePlan, info: VideoInfo, codec: str, bitrate_kbps: int = 0
 ) -> list[str]:
@@ -93,9 +108,14 @@ def build_video_args(
         else:
             args += ["-preset", X264_PRESET, "-crf", str(q)]
 
+    # 滤镜按"先转正、再缩放"的顺序串。反过来会让缩放先按歪的宽高算，
+    # 90° 旋转后尺寸会差一倍
+    filters: list[str] = list(_rotation_filters(plan.rotation))
     if (height := resolve_scale(plan, info)) is not None:
         # -2 保证宽度按比例取偶数，h264 要求偶数尺寸
-        args += ["-vf", f"scale=-2:{height}"]
+        filters.append(f"scale=-2:{height}")
+    if filters:
+        args += ["-vf", ",".join(filters)]
 
     if plan.fps and plan.fps not in ("keep", "原帧率", ""):
         try:
@@ -110,12 +130,28 @@ def build_video_args(
     return args
 
 
+# 容器放得下的音频编码。mp3 的编码器名和容器名不是一回事，得转一层
+_AUDIO_ENCODERS = {"aac": "aac", "mp3": "libmp3lame"}
+
+
 def build_audio_args(plan: TranscodePlan, info: VideoInfo) -> list[str]:
-    """音频流参数。没有音轨就明确 -an，别让 ffmpeg 自己猜。"""
-    if not info.has_audio:
+    """音频流参数。没有音轨、或者用户勾了「去掉声音」，都明确 -an，别让 ffmpeg 自己猜。"""
+    if plan.strip_audio or not info.has_audio:
         return ["-an"]
+
+    codec = plan.audio_codec if plan.audio_codec in ("aac", "mp3", "copy") else "aac"
+    if codec == "copy":
+        # 直接复制原音轨时不能再给码率/采样率/声道，给了 ffmpeg 会报错
+        return ["-c:a", "copy"]
+
+    args = ["-c:a", _AUDIO_ENCODERS[codec]]
     audio_kbps = max(32, min(320, int(plan.audio_bitrate_kbps or 128)))
-    return ["-c:a", "aac", "-b:a", f"{audio_kbps}k"]
+    args += ["-b:a", f"{audio_kbps}k"]
+    if plan.audio_sample_rate:
+        args += ["-ar", str(int(plan.audio_sample_rate))]
+    if plan.audio_channels in (1, 2):
+        args += ["-ac", str(int(plan.audio_channels))]
+    return args
 
 
 def build_args(

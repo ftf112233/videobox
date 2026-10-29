@@ -1,26 +1,57 @@
-"""右栏：需求输入 → 参数方案 → 效果说明。
+"""右栏：需求输入 → 参数方案 → 效果说明 → 高级参数。
 
-设计上有过一版是给每个参数附上「理由 + 置信度」，界面渲染成
-「（quality，置信度 85%）」这种东西。它回答了"AI 为什么这么选"，
-但用户真正要的是"这样设我会得到什么"——前者是开发者的好奇心，
-后者才是使用者的决策依据。所以这一版：
+界面分两层，这是刻意的：
 
-- 参数全部档位化：画质是高/标准/省体积，不是 24；音质是标准/清晰，不是 96 kbps
-- 说明区只留一句人话的效果与风险，不带参数名、不带置信度
-- 命令和参数修正记录收进「技术细节」，默认折叠——想验的人能验，
-  不想看的人不会被一整行 ffmpeg 参数糊脸
+**第一层**只出现人能判断的东西。画质是「极佳 / 高 / 标准 / 省体积」，
+音质是「省流量 / 标准 / 清晰 / 高音质」，说明只回答"我会得到什么"。
+不懂视频编码的人走到这里就能把事办完。
+
+**第二层**在「高级设置」里：编码器偏好、CRF、帧率、音频编码、码率、
+采样率、声道、旋转。会打开这一层的人本来就想要这些——把数值框从他手里
+拿走不叫体贴，叫阉割。两层是双向绑定的：改档位 CRF 跟着走，改 CRF
+档位显示最近的一档。
+
+说明区不出现参数名和置信度：用户拿这两样做不出任何决定。
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ...core import labels
 from ...core.models import CONTAINERS, SCALE_TARGETS, TranscodePlan
+
+# 编码器偏好。界面上不写 libx264 这种名字，但要让人能表达"我想用哪个"
+CODEC_PREF_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("自动选择", "auto"),
+    ("优先用显卡", "h264_nvenc"),
+    ("只用 CPU", "libx264"),
+)
+
+
+def _fill_combo(box: QComboBox, options) -> None:
+    for text, value in options:
+        box.addItem(text, value)
+
+
+def _select_data(box: QComboBox, value) -> None:
+    index = box.findData(value)
+    box.setCurrentIndex(index if index >= 0 else 0)
+
+
+def _label_cell(text: str, widget: QWidget) -> QVBoxLayout:
+    """一个「小标题 + 控件」的竖排单元，参数网格里反复用到。"""
+    cell = QVBoxLayout()
+    cell.setSpacing(4)
+    name = QLabel(text)
+    name.setObjectName("Hint")
+    cell.addWidget(name)
+    cell.addWidget(widget)
+    return cell
 
 
 class AdvisorPanel(QFrame):
@@ -31,6 +62,7 @@ class AdvisorPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("Card")
         self._has_plan = False
+        self._stale = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 16, 18, 16)
@@ -74,7 +106,7 @@ class AdvisorPanel(QFrame):
         self.notice_label.hide()
         root.addWidget(self.notice_label)
 
-        # ---- 参数区（全部是选档位，没有裸数字） ----
+        # ---- 第一层参数：全是档位，没有裸数字 ----
         params = QGridLayout()
         params.setHorizontalSpacing(10)
         params.setVerticalSpacing(9)
@@ -112,13 +144,7 @@ class AdvisorPanel(QFrame):
         ]
         for idx, (label, widget) in enumerate(specs):
             r, c = divmod(idx, 2)
-            cell = QVBoxLayout()
-            cell.setSpacing(4)
-            name = QLabel(label)
-            name.setObjectName("Hint")
-            cell.addWidget(name)
-            cell.addWidget(widget)
-            params.addLayout(cell, r, c)
+            params.addLayout(_label_cell(label, widget), r, c)
         params.setColumnStretch(0, 1)
         params.setColumnStretch(1, 1)
         root.addLayout(params)
@@ -139,17 +165,20 @@ class AdvisorPanel(QFrame):
         root.addWidget(self.stale_hint)
 
         # 用一列 QLabel 而不是 QListWidget：条数最多五六条，不需要滚动，
-        # 而列表控件会把剩余高度全吃掉，把下面的"技术细节"顶到窗口最底部。
+        # 而列表控件会把剩余高度全吃掉，把下面的入口顶到窗口最底部。
         self.effects_host = QWidget()
         self.effects_box = QVBoxLayout(self.effects_host)
         self.effects_box.setContentsMargins(0, 0, 0, 0)
-        self.effects_box.setSpacing(7)
+        self.effects_box.setSpacing(6)
         root.addWidget(self.effects_host)
 
-        # ---- 技术细节（默认折叠） ----
+        # ---- 第二层：高级设置（默认折叠） ----
         self.detail_toggle = QToolButton()
         self.detail_toggle.setObjectName("DetailToggle")
-        self.detail_toggle.setText("技术细节：将要执行的命令")
+        self.detail_toggle.setText("高级设置：精调参数与命令")
+        self.detail_toggle.setToolTip(
+            "CRF、帧率、采样率、声道、旋转都在这里。日常使用不需要打开。"
+        )
         self.detail_toggle.setCheckable(True)
         self.detail_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self.detail_toggle.setToolButtonStyle(
@@ -161,7 +190,83 @@ class AdvisorPanel(QFrame):
         self.detail_box = QWidget()
         detail_layout = QVBoxLayout(self.detail_box)
         detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(6)
+        detail_layout.setSpacing(9)
+
+        pro = QGridLayout()
+        pro.setHorizontalSpacing(10)
+        pro.setVerticalSpacing(9)
+
+        self.codec_pref_box = QComboBox()
+        _fill_combo(self.codec_pref_box, CODEC_PREF_OPTIONS)
+        self.codec_pref_box.setToolTip("自动选择会优先用显卡，跑不动再退回 CPU。")
+
+        self.quality_spin = QSpinBox()
+        self.quality_spin.setRange(18, 35)
+        self.quality_spin.setToolTip(
+            "CRF：越小画质越好、体积越大。18 接近无损，23 常用，28 以上肉眼可见损失。"
+        )
+
+        self.fps_box = QComboBox()
+        _fill_combo(self.fps_box, labels.FPS_OPTIONS)
+        self.fps_box.setToolTip(labels.FPS_TOOLTIP)
+
+        self.audio_codec_box = QComboBox()
+        _fill_combo(self.audio_codec_box, labels.AUDIO_CODEC_OPTIONS)
+
+        self.audio_kbps_spin = QSpinBox()
+        self.audio_kbps_spin.setRange(32, 320)
+        self.audio_kbps_spin.setSingleStep(16)
+        self.audio_kbps_spin.setSuffix(" kbps")
+
+        self.sample_rate_box = QComboBox()
+        _fill_combo(self.sample_rate_box, labels.SAMPLE_RATE_OPTIONS)
+        self.sample_rate_box.setToolTip(labels.SAMPLE_RATE_TOOLTIP)
+
+        self.channels_box = QComboBox()
+        _fill_combo(self.channels_box, labels.CHANNEL_OPTIONS)
+        self.channels_box.setToolTip(labels.CHANNEL_TOOLTIP)
+
+        self.rotation_box = QComboBox()
+        _fill_combo(self.rotation_box, labels.ROTATION_OPTIONS)
+        self.rotation_box.setToolTip(labels.ROTATION_TOOLTIP)
+
+        pro_specs = [
+            ("编码器偏好", self.codec_pref_box), ("质量值 CRF", self.quality_spin),
+            ("帧率", self.fps_box), ("音频编码", self.audio_codec_box),
+            ("音频码率", self.audio_kbps_spin), ("采样率", self.sample_rate_box),
+            ("声道", self.channels_box), ("旋转", self.rotation_box),
+        ]
+        for idx, (label, widget) in enumerate(pro_specs):
+            r, c = divmod(idx, 3)
+            pro.addLayout(_label_cell(label, widget), r, c)
+        for col in range(3):
+            pro.setColumnStretch(col, 1)
+        detail_layout.addLayout(pro)
+
+        self.strip_audio_check = QCheckBox("去掉声音（输出一个没有音轨的视频）")
+        detail_layout.addWidget(self.strip_audio_check)
+
+        # 两层之间的双向绑定：改档位数值跟着走，改数值档位显示最近的一档
+        self.quality_box.currentIndexChanged.connect(self._sync_level_to_crf)
+        self.quality_spin.valueChanged.connect(self._sync_crf_to_level)
+        self.audio_box.currentIndexChanged.connect(self._sync_level_to_kbps)
+        self.audio_kbps_spin.valueChanged.connect(self._sync_kbps_to_level)
+
+        for widget in (self.codec_pref_box, self.fps_box, self.audio_codec_box,
+                       self.sample_rate_box, self.channels_box, self.rotation_box):
+            widget.currentIndexChanged.connect(lambda _: self._on_user_edit())
+        self.audio_kbps_spin.valueChanged.connect(lambda _: self._on_user_edit())
+        self.quality_spin.valueChanged.connect(lambda _: self._on_user_edit())
+        self.strip_audio_check.toggled.connect(lambda _: self._on_user_edit())
+
+        divider = QFrame()
+        divider.setObjectName("HLine")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        detail_layout.addWidget(divider)
+
+        cmd_label = QLabel("将要执行的命令")
+        cmd_label.setObjectName("Hint")
+        detail_layout.addWidget(cmd_label)
 
         self.fix_label = QLabel("")
         self.fix_label.setObjectName("Hint")
@@ -194,14 +299,52 @@ class AdvisorPanel(QFrame):
     def _on_user_edit(self) -> None:
         if not self._has_plan:
             return
-        self.stale_hint.show()
+        self._stale = True
+        self._refresh_effect_visibility()
         self.plan_changed.emit()
+
+    def _refresh_effect_visibility(self) -> None:
+        """效果说明只在"看方案"的时候出现。
+
+        展开高级设置意味着进入调参模式：这时方案解释既用不上，
+        又会把右栏顶出窗口高度。所以两者互斥显示。
+        """
+        show = self._has_plan and not self.detail_toggle.isChecked()
+        for widget in (self.effect_title, self.effects_host):
+            widget.setVisible(show)
+        self.stale_hint.setVisible(show and self._stale)
 
     def _on_detail_toggled(self, checked: bool) -> None:
         self.detail_box.setVisible(checked)
         self.detail_toggle.setArrowType(
             Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
         )
+        self._refresh_effect_visibility()
+
+    # ---- 档位 ↔ 数值 双向同步 ----
+    def _sync_level_to_crf(self, _index: int) -> None:
+        value = labels.quality_value(self.quality_box.currentText())
+        self.quality_spin.blockSignals(True)
+        self.quality_spin.setValue(value)
+        self.quality_spin.blockSignals(False)
+
+    def _sync_crf_to_level(self, value: int) -> None:
+        label = labels.quality_label(value)
+        self.quality_box.blockSignals(True)
+        self.quality_box.setCurrentText(label)
+        self.quality_box.blockSignals(False)
+
+    def _sync_level_to_kbps(self, _index: int) -> None:
+        value = labels.audio_value(self.audio_box.currentText())
+        self.audio_kbps_spin.blockSignals(True)
+        self.audio_kbps_spin.setValue(value)
+        self.audio_kbps_spin.blockSignals(False)
+
+    def _sync_kbps_to_level(self, value: int) -> None:
+        label = labels.audio_label(value)
+        self.audio_box.blockSignals(True)
+        self.audio_box.setCurrentText(label)
+        self.audio_box.blockSignals(False)
 
     def _set_plan_area_visible(self, visible: bool) -> None:
         """空状态把整个方案区收起来。
@@ -233,7 +376,11 @@ class AdvisorPanel(QFrame):
         从哪开始"的典型来源。置灰等于明说：先给我一个视频。
         """
         for widget in (self.container_box, self.scale_box, self.quality_box,
-                       self.audio_box, self.target_spin):
+                       self.audio_box, self.target_spin, self.codec_pref_box,
+                       self.quality_spin, self.fps_box, self.audio_codec_box,
+                       self.audio_kbps_spin, self.sample_rate_box,
+                       self.channels_box, self.rotation_box,
+                       self.strip_audio_check):
             widget.setEnabled(enabled)
 
     def _clear_effects(self) -> None:
@@ -273,11 +420,16 @@ class AdvisorPanel(QFrame):
 
         self.preset_label.setText(plan.preset_name)
         self._style_preset(True)
+        self._stale = False
         self.stale_hint.hide()
 
         # 更新控件时先断开，避免触发一串 plan_changed
-        widgets = (self.container_box, self.scale_box,
-                   self.quality_box, self.audio_box, self.target_spin)
+        widgets = [
+            self.container_box, self.scale_box, self.quality_box, self.audio_box,
+            self.target_spin, self.codec_pref_box, self.quality_spin, self.fps_box,
+            self.audio_codec_box, self.audio_kbps_spin, self.sample_rate_box,
+            self.channels_box, self.rotation_box, self.strip_audio_check,
+        ]
         for w in widgets:
             w.blockSignals(True)
 
@@ -289,12 +441,23 @@ class AdvisorPanel(QFrame):
         self.audio_box.setCurrentText(labels.audio_label(plan.audio_bitrate_kbps))
         self.target_spin.setValue(plan.target_size_mb or 0)
 
+        _select_data(self.codec_pref_box, plan.video_codec)
+        self.quality_spin.setValue(plan.quality_value)
+        _select_data(self.fps_box, plan.fps if plan.fps else "keep")
+        _select_data(self.audio_codec_box, plan.audio_codec)
+        self.audio_kbps_spin.setValue(plan.audio_bitrate_kbps)
+        _select_data(self.sample_rate_box, plan.audio_sample_rate)
+        _select_data(self.channels_box, plan.audio_channels)
+        _select_data(self.rotation_box, plan.rotation)
+        self.strip_audio_check.setChecked(plan.strip_audio)
+
         for w in widgets:
             w.blockSignals(False)
 
         self._fill_effects(plan.reasons, plan.risks)
+        self._refresh_effect_visibility()
 
-        # 参数修正记录属于"程序替你改了什么"，收进技术细节
+        # 参数修正记录属于"程序替你改了什么"，收进高级设置
         if warnings:
             lines = ["·　" + w for w in warnings]
             self.fix_label.setText("参数被自动修正过：\n" + "\n".join(lines))
@@ -304,12 +467,22 @@ class AdvisorPanel(QFrame):
             self.fix_label.setText("")
 
     def current_overrides(self) -> dict:
-        """用户在界面上的手动修改，覆盖到 plan 上。"""
+        """用户在界面上的手动修改，覆盖到 plan 上。
+
+        精调值优先：改了 CRF 就用 CRF，档位只是它的快捷方式。
+        """
         return {
             "container": self.container_box.currentText(),
             "scale": self.scale_box.currentText(),
-            "quality_value": labels.quality_value(self.quality_box.currentText()),
-            "audio_bitrate_kbps": labels.audio_value(self.audio_box.currentText()),
+            "quality_value": self.quality_spin.value(),
+            "video_codec": self.codec_pref_box.currentData() or "auto",
+            "fps": self.fps_box.currentData() or "keep",
+            "audio_codec": self.audio_codec_box.currentData() or "aac",
+            "audio_bitrate_kbps": self.audio_kbps_spin.value(),
+            "audio_sample_rate": self.sample_rate_box.currentData() or 0,
+            "audio_channels": self.channels_box.currentData() or 0,
+            "rotation": self.rotation_box.currentData() or 0,
+            "strip_audio": self.strip_audio_check.isChecked(),
             "target_size_mb": self.target_spin.value() or None,
         }
 
@@ -327,6 +500,7 @@ class AdvisorPanel(QFrame):
 
     def reset(self) -> None:
         self._has_plan = False
+        self._stale = False
         self.request_edit.clear()
         self.preset_label.setText("载入视频后自动生成方案")
         self._style_preset(False)

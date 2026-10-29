@@ -144,6 +144,13 @@ class TranscodePlan:
     audio_bitrate_kbps: int = 128
     target_size_mb: float | None = None
 
+    # ---- 专业参数 ----
+    # 默认值一律等于"不干预"，所以只用人话档位的人永远不会碰到它们
+    audio_sample_rate: int = 0     # 0 = 跟随源；否则 8000~96000
+    audio_channels: int = 0        # 0 = 跟随源，1 = 单声道，2 = 立体声
+    rotation: int = 0              # 0 / 90 / 180 / 270，顺时针为正
+    strip_audio: bool = False      # 去掉声音（-an）
+
     # 每条都是用户能读的一句话：会得到什么、要注意什么
     reasons: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)

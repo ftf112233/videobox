@@ -20,8 +20,8 @@ from PySide6.QtGui import (
     QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QIcon, QImage,
 )
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout,
-    QWidget,
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..core import labels, thumb as thumb_mod
@@ -53,7 +53,7 @@ CONFIG_PATH = app_data_dir() / "config.json"
 
 DEFAULT_TITLE = "VideoBox · AI 视频转码器"
 MIN_SIZE = (1000, 660)
-DEFAULT_SIZE = (1180, 760)
+DEFAULT_SIZE = (1180, 900)
 
 
 def load_config() -> dict:
@@ -158,7 +158,17 @@ class MainWindow(QMainWindow):
         right = QVBoxLayout()
         right.setSpacing(12)
         self.advisor_panel = AdvisorPanel()
-        right.addWidget(self.advisor_panel, 1)
+        # 展开高级设置时右栏会比窗口高，套一层纵向滚动；
+        # 不套的话窗口一压缩，最下面的命令预览就被裁掉
+        self.advisor_scroll = QScrollArea()
+        self.advisor_scroll.setWidgetResizable(True)
+        self.advisor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.advisor_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.advisor_scroll.viewport().setStyleSheet("background: transparent;")
+        self.advisor_scroll.setWidget(self.advisor_panel)
+        right.addWidget(self.advisor_scroll, 1)
         body.addLayout(right, 1)
 
         outer.addLayout(body, 1)

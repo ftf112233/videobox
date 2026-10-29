@@ -124,5 +124,68 @@ class TestNotices(unittest.TestCase):
         self.assertTrue(panel.notice_label.isHidden())
 
 
+class TestAdvancedSync(unittest.TestCase):
+    """第一层档位和第二层数值必须始终一致。
+
+    这两层是同一个东西的两种说法。哪一层不同步，用户改了 A 却发现
+    实际跑的是 B，就是最坏的那种 bug——他做了操作、看到了反馈、结果不是他想的那样。
+    """
+
+    def setUp(self):
+        self.panel = AdvisorPanel()
+        self.panel.apply_plan(make_plan(), [], used_ai=True)
+
+    def test_level_drives_number(self):
+        self.panel.quality_box.setCurrentText("省体积")
+        self.assertEqual(self.panel.quality_spin.value(), 30)
+
+    def test_number_drives_level(self):
+        self.panel.quality_spin.setValue(20)
+        self.assertEqual(self.panel.quality_box.currentText(), "极佳")
+
+    def test_precise_value_wins_over_level(self):
+        # 25 落在"高"(23) 和"标准"(26) 之间，档位显示最近的一档，
+        # 但真正生效的必须是 25 这个精调值
+        self.panel.quality_spin.setValue(25)
+        self.assertEqual(self.panel.current_overrides()["quality_value"], 25)
+
+    def test_audio_levels_sync_too(self):
+        self.panel.audio_box.setCurrentText("高音质")
+        self.assertEqual(self.panel.audio_kbps_spin.value(), 192)
+        self.panel.audio_kbps_spin.setValue(64)
+        self.assertEqual(self.panel.audio_box.currentText(), "省流量")
+
+    def test_advanced_defaults_do_not_interfere(self):
+        overrides = self.panel.current_overrides()
+        self.assertEqual(overrides["rotation"], 0)
+        self.assertEqual(overrides["audio_sample_rate"], 0)
+        self.assertFalse(overrides["strip_audio"])
+
+    def test_advanced_choices_reach_overrides(self):
+        self.panel.rotation_box.setCurrentIndex(self.panel.rotation_box.findData(90))
+        self.panel.strip_audio_check.setChecked(True)
+        self.panel.fps_box.setCurrentIndex(self.panel.fps_box.findData("30"))
+        overrides = self.panel.current_overrides()
+        self.assertEqual(overrides["rotation"], 90)
+        self.assertTrue(overrides["strip_audio"])
+        self.assertEqual(overrides["fps"], "30")
+
+    def test_plan_lands_in_advanced_controls(self):
+        from videobox.core.models import TranscodePlan
+
+        plan = TranscodePlan(rotation=270, strip_audio=True, fps="24",
+                             audio_sample_rate=44100, audio_channels=1,
+                             audio_codec="mp3", quality_value=19)
+        self.panel.apply_plan(plan, [], used_ai=False)
+        self.assertEqual(self.panel.quality_spin.value(), 19)
+        self.assertEqual(self.panel.quality_box.currentText(), "极佳")
+        self.assertEqual(self.panel.rotation_box.currentData(), 270)
+        self.assertTrue(self.panel.strip_audio_check.isChecked())
+        self.assertEqual(self.panel.fps_box.currentData(), "24")
+        self.assertEqual(self.panel.sample_rate_box.currentData(), 44100)
+        self.assertEqual(self.panel.channels_box.currentData(), 1)
+        self.assertEqual(self.panel.audio_codec_box.currentData(), "mp3")
+
+
 if __name__ == "__main__":
     unittest.main()

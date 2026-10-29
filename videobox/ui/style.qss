@@ -229,6 +229,30 @@ QLabel#EffectWarn {
     font-size: 13px;
 }
 
+/* 高级设置里的分隔线 */
+QFrame#HLine {
+    border: none;
+    border-top: 1px solid #E5E6EB;
+    max-height: 1px;
+}
+
+/* 右栏可能比窗口高（展开高级设置时），允许纵向滚动但不显示横向条 */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea > QWidget > QWidget {
+    background: transparent;
+}
+
+/* 勾选框保留原生指示器：自绘的话 QSS 只能改底色，
+   勾选后变成一个纯色方块，反而看不出有没有勾上 */
+QCheckBox {
+    color: #1F2329;
+    spacing: 8px;
+}
+
 /* ---------- 滚动条 ---------- */
 QScrollBar:vertical {
     background: transparent;

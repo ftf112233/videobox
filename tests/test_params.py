@@ -10,6 +10,7 @@ from videobox.core.params import (
     QUALITY_MIN,
     build_args,
     build_audio_args,
+    build_video_args,
     choose_codec,
     clamp_quality,
     estimate_bitrate_kbps,
@@ -183,3 +184,61 @@ class TestBuildArgs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestProfessionalParams(unittest.TestCase):
+    """高级设置里的参数：转正、静音、音轨处理。
+
+    这些是"会打开那一层的人才用"的选项，但拼错了就是坏文件，必须钉住。
+    """
+
+    def test_rotation_runs_before_scale(self):
+        plan = TranscodePlan(rotation=90, scale="720p")
+        args = build_video_args(plan, INFO_1080P, "libx264")
+        vf = args[args.index("-vf") + 1]
+        # 先转正再缩放。反过来的话缩放会按歪的宽高算，尺寸差一倍
+        self.assertEqual(vf, "transpose=1,scale=-2:720")
+
+    def test_rotation_alone_needs_no_scale(self):
+        args = build_video_args(TranscodePlan(rotation=270), INFO_1080P, "libx264")
+        self.assertEqual(args[args.index("-vf") + 1], "transpose=2")
+
+    def test_rotation_180_uses_flip(self):
+        args = build_video_args(TranscodePlan(rotation=180), INFO_1080P, "libx264")
+        self.assertEqual(args[args.index("-vf") + 1], "hflip,vflip")
+
+    def test_illegal_rotation_is_ignored(self):
+        args = build_video_args(TranscodePlan(rotation=45), INFO_1080P, "libx264")
+        self.assertNotIn("-vf", args)
+
+    def test_strip_audio_wins_over_everything(self):
+        plan = TranscodePlan(strip_audio=True, audio_codec="copy", audio_sample_rate=48000)
+        self.assertEqual(build_audio_args(plan, INFO_1080P), ["-an"])
+
+    def test_no_source_audio_still_an(self):
+        self.assertEqual(build_audio_args(TranscodePlan(), INFO_NO_AUDIO), ["-an"])
+
+    def test_stream_copy_drops_every_other_audio_flag(self):
+        # 复制音轨时再给 -b:a / -ar / -ac，ffmpeg 会直接报错
+        plan = TranscodePlan(audio_codec="copy", audio_bitrate_kbps=192,
+                             audio_sample_rate=48000, audio_channels=1)
+        self.assertEqual(build_audio_args(plan, INFO_1080P), ["-c:a", "copy"])
+
+    def test_mp3_maps_to_real_encoder_name(self):
+        plan = TranscodePlan(audio_codec="mp3")
+        self.assertEqual(build_audio_args(plan, INFO_1080P)[:2], ["-c:a", "libmp3lame"])
+
+    def test_sample_rate_and_channels(self):
+        plan = TranscodePlan(audio_sample_rate=44100, audio_channels=1)
+        args = build_audio_args(plan, INFO_1080P)
+        self.assertEqual(args[args.index("-ar") + 1], "44100")
+        self.assertEqual(args[args.index("-ac") + 1], "1")
+
+    def test_zero_means_leave_alone(self):
+        args = build_audio_args(TranscodePlan(), INFO_1080P)
+        self.assertNotIn("-ar", args)
+        self.assertNotIn("-ac", args)
+
+
+if __name__ == "__main__":
+    unittest.main()
