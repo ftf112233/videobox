@@ -230,5 +230,56 @@ class TestEmptyGuidance(unittest.TestCase):
         self.assertFalse(panel.params_host.isVisibleTo(panel))
 
 
+class TestComboPopup(unittest.TestCase):
+    """下拉列表的可读性。
+
+    真实运行时出现过一次：列表是黑底，选项文字是深灰——整个列表等于看不见。
+    原因是 QSS 只给 view 写了 `background`，而列表项仍按 palette.base() 绘制。
+    这条直接采样渲染出来的像素：QSS 里写了什么不算数，屏幕上是白的才算。
+    """
+
+    def setUp(self):
+        self.panel = AdvisorPanel()
+        self.panel.show()
+        self.panel.apply_plan(make_plan(), [], used_ai=True)
+        _APP.processEvents()
+
+    def tearDown(self):
+        self.panel.close()
+        self.panel.deleteLater()
+
+    def test_popup_background_is_light(self):
+        box = self.panel.quality_box
+        box.showPopup()
+        _APP.processEvents()
+        try:
+            img = box.view().grab().toImage()
+            self.assertGreater(img.width(), 50, "下拉列表没显示出来")
+            # 左侧边缘几像素落在列表项背景上，不压字
+            for y in (4, img.height() // 2, img.height() - 4):
+                color = img.pixelColor(4, y)
+                self.assertGreater(
+                    color.lightness(), 180,
+                    f"下拉列表 y={y} 处是 {color.name()}，太深（会变成黑底深字）",
+                )
+        finally:
+            box.hidePopup()
+
+
+class TestArrowAssets(unittest.TestCase):
+    """数值框和下拉框的箭头是外部小图。
+
+    QSS 里 url() 指向不存在的文件时 Qt 静默跳过——界面不崩，
+    只是控件变空。这种失败最难发现，所以直接检查文件在不在。
+    """
+
+    def test_arrow_images_exist(self):
+        from videobox.app import _resource_path
+
+        for name in ("spin_up.png", "spin_down.png", "chevron_down.png"):
+            path = _resource_path(f"ui/assets/{name}")
+            self.assertTrue(path.is_file(), f"缺少箭头图：{path}")
+
+
 if __name__ == "__main__":
     unittest.main()

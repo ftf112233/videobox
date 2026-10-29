@@ -23,7 +23,7 @@ from .ui.main_window import MainWindow
 log = logging.getLogger(__name__)
 
 APP_NAME = "VideoBox"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 
 def _resource_path(relative: str) -> Path:
@@ -41,7 +41,47 @@ def _resource_path(relative: str) -> Path:
     return Path(__file__).resolve().parent / relative
 
 
+def apply_light_palette(app: QApplication) -> None:
+    """把调色板钉死成浅色，不跟随系统深色主题。
+
+    界面颜色全部写在 QSS 里，但 QSS 只管它明确写了的部分。没写到的
+    ——菜单栏、消息框、下拉列表的项、滚动条——走的是 palette。
+    系统开深色主题时，这些地方会变成深底，而 QSS 里的文字色是深灰，
+    结果就是"黑底深字"：控件还在，内容看不见。
+
+    实际遇到过两次：下拉列表整片黑、菜单栏一条深灰。两次都不算崩溃，
+    但都属于"程序没坏，就是用不了"。
+    """
+    from PySide6.QtGui import QColor, QPalette
+
+    pal = QPalette()
+    ink = QColor("#1F2329")
+    paper = QColor("#FFFFFF")
+
+    pal.setColor(QPalette.ColorRole.Window, QColor("#F5F6F7"))
+    pal.setColor(QPalette.ColorRole.WindowText, ink)
+    pal.setColor(QPalette.ColorRole.Base, paper)
+    pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#F7F8FA"))
+    pal.setColor(QPalette.ColorRole.Text, ink)
+    pal.setColor(QPalette.ColorRole.Button, paper)
+    pal.setColor(QPalette.ColorRole.ButtonText, ink)
+    pal.setColor(QPalette.ColorRole.ToolTipBase, paper)
+    pal.setColor(QPalette.ColorRole.ToolTipText, ink)
+    pal.setColor(QPalette.ColorRole.Highlight, QColor("#2F6FED"))
+    pal.setColor(QPalette.ColorRole.HighlightedText, paper)
+    pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#A9AEB8"))
+    app.setPalette(pal)
+
+
 def load_stylesheet(app: QApplication) -> None:
+    """装主题：调色板 + QSS。
+
+    两件事绑在一起是有原因的——QSS 和 palette 必须同色调。只装 QSS
+    的话，QSS 没写到的控件会跟系统主题走；只设 palette 的话，
+    QSS 里的圆角、间距全没了。
+    """
+    apply_light_palette(app)
+
     qss_path = _resource_path("ui/style.qss")
     try:
         text = qss_path.read_text(encoding="utf-8")

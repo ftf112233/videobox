@@ -162,23 +162,46 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
 
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
     image: url(__UI__/assets/spin_up.png);
-    width: 8px;
-    height: 5px;
+    width: 10px;
+    height: 6px;
 }
 
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
     image: url(__UI__/assets/spin_down.png);
-    width: 8px;
-    height: 5px;
+    width: 10px;
+    height: 6px;
+}
+
+/* 下拉框右侧的箭头。和数值框共用那张三角图——
+   不写这条，框右边是空的，看不出能点。 */
+QComboBox::down-arrow {
+    image: url(__UI__/assets/chevron_down.png);
+    width: 10px;
+    height: 6px;
 }
 
 QComboBox QAbstractItemView {
-    background: #FFFFFF;
+    /* 必须用 background-color 且逐项再写一遍。
+       只写 background 时，列表项仍按 palette.base() 绘制，
+       某些系统主题下那是纯黑——白字变黑底黑字，整个列表等于看不见。 */
+    background-color: #FFFFFF;
+    color: #1F2329;
     border: 1px solid #E5E6EB;
     border-radius: 6px;
-    selection-background-color: #EAF1FE;
-    selection-color: #2F6FED;
-    outline: none;
+    outline: 0;
+    padding: 4px 0;
+}
+
+QComboBox QAbstractItemView::item {
+    min-height: 28px;
+    padding: 0 10px;
+    background-color: #FFFFFF;
+    color: #1F2329;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background-color: #EAF1FE;
+    color: #2F6FED;
 }
 
 /* ---------- 按钮 ---------- */
@@ -412,4 +435,15 @@ QStatusBar {
     background: #FFFFFF;
     border-top: 1px solid #E5E6EB;
     color: #646A73;
+}
+
+/* 悬停提示。每个参数都有 tooltip，系统开深色主题时它会是黑底，
+   而我们没写规则的话文字仍是深灰——提示框里一片看不见的字。
+   应用级的浅色调色板能兜住一部分，这里再显式写死。 */
+QToolTip {
+    background-color: #FFFFFF;
+    color: #1F2329;
+    border: 1px solid #D9DCE1;
+    border-radius: 4px;
+    padding: 5px 8px;
 }
