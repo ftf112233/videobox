@@ -38,6 +38,17 @@ class InfoPanel(QFrame):
         self.thumb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         root.addWidget(self.thumb, alignment=Qt.AlignmentFlag.AlignHCenter)
 
+        # 拖拽区下面直接写支持什么格式。
+        # 不写的话用户拖之前不知道行不行——尤其是 .mov、.mkv、.flv 这些
+        # 会被"在线转换网站"当卖点的格式，恰恰是他最没把握的。
+        self.formats_hint = QLabel(
+            "mp4 · mov · mkv · avi · webm · flv · ts 都能直接打开"
+        )
+        self.formats_hint.setObjectName("Hint")
+        self.formats_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.formats_hint.setWordWrap(True)
+        root.addWidget(self.formats_hint)
+
         self.filename = QLabel("尚未选择文件")
         self.filename.setObjectName("Value")
         self.filename.setWordWrap(True)
@@ -96,6 +107,8 @@ class InfoPanel(QFrame):
         from ...core import labels
 
         self.filename.setText(Path(info.path).name)
+        # 文件已经载入，格式说明的使命结束，把高度让给信息区
+        self.formats_hint.hide()
         f = self._fields
         f["duration"].setText(info.duration_label)
         f["resolution"].setText(info.resolution_label)
@@ -133,5 +146,6 @@ class InfoPanel(QFrame):
         self.thumb.setText("拖一个视频到这里\n或点击「打开文件」")
         self.thumb.setStyleSheet("")
         self.filename.setText("尚未选择文件")
+        self.formats_hint.show()
         for v in self._fields.values():
             v.setText("—")

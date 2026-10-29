@@ -23,7 +23,7 @@ from .ui.main_window import MainWindow
 log = logging.getLogger(__name__)
 
 APP_NAME = "VideoBox"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 
 def _resource_path(relative: str) -> Path:
@@ -42,11 +42,18 @@ def _resource_path(relative: str) -> Path:
 
 
 def load_stylesheet(app: QApplication) -> None:
-    qss = _resource_path("ui/style.qss")
+    qss_path = _resource_path("ui/style.qss")
     try:
-        app.setStyleSheet(qss.read_text(encoding="utf-8"))
+        text = qss_path.read_text(encoding="utf-8")
     except OSError:
-        log.warning("样式表未找到：%s（将使用 Qt 默认外观）", qss)
+        log.warning("样式表未找到：%s（将使用 Qt 默认外观）", qss_path)
+        return
+
+    # QSS 里的 url() 相对的不是样式表所在目录，而是进程的工作目录。
+    # 开发态碰巧对（cwd 就是仓库根），打包后双击 exe 时 cwd 是别处，
+    # 图标会静默丢失。所以在这儿换成绝对路径（正斜杠，Qt 认）。
+    ui_dir = qss_path.parent.as_posix()
+    app.setStyleSheet(text.replace("__UI__", ui_dir))
 
 
 def load_icon(app: QApplication) -> None:

@@ -55,6 +55,34 @@ QLabel#Notice {
     padding: 7px 10px;
 }
 
+/* ---------- 空态的三步引导 ---------- */
+/* 卡片是白底：右栏本身是浅灰，同色框放进去等于没画 */
+QFrame#EmptyGuide {
+    background: #FFFFFF;
+    border: 1px solid #E5E6EB;
+    border-radius: 10px;
+}
+
+QLabel#StepTitle {
+    color: #1F2329;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+QLabel#StepNo {
+    background: #E1EAFB;
+    border-radius: 11px;
+    color: #2F6FED;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#Step {
+    color: #1F2329;
+    font-size: 14px;
+    padding-top: 1px;
+}
+
 /* ---------- 缩略图占位 ---------- */
 QLabel#Thumb {
     background: #F2F3F5;
@@ -82,7 +110,8 @@ QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid #2F6FED;
 }
 
-QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled,
+QDoubleSpinBox:disabled {
     background: #F7F8FA;
     color: #A9AEB8;
 }
@@ -95,7 +124,17 @@ QComboBox::drop-down {
 /* 数值框的上下箭头：默认的 Windows 原生箭头又小又糊，
    换成自绘三角 + 独立按钮区，看起来才像个现代控件 */
 QSpinBox, QDoubleSpinBox {
-    padding: 7px 22px 7px 10px;
+    padding: 7px 10px;
+}
+
+/* 数值框的上下按钮。
+   箭头不能在这儿画——QSS 不支持用 border 拼三角形（浏览器里那套
+   width:0 + 透明边框），Qt 会把剩下的边框渲染成实心方块；
+   而不写规则又只剩一条没有箭头的灰条。
+   所以箭头用 scripts/make_spin_arrows.py 生成的两张小图，
+   __UI__ 在加载时替换成真实的样式目录。 */
+QSpinBox, QDoubleSpinBox {
+    padding: 7px 24px 7px 10px;
 }
 
 QSpinBox::up-button, QDoubleSpinBox::up-button {
@@ -122,19 +161,15 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
 }
 
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 5px solid #86909C;
+    image: url(__UI__/assets/spin_up.png);
+    width: 8px;
+    height: 5px;
 }
 
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #86909C;
+    image: url(__UI__/assets/spin_down.png);
+    width: 8px;
+    height: 5px;
 }
 
 QComboBox QAbstractItemView {
@@ -184,10 +219,13 @@ QPushButton#Primary:hover {
     color: #FFFFFF;
 }
 
+/* 禁用态要一眼看出"现在不能点"。
+   原来用浅蓝（#A9C2F5）保留品牌色，结果它看起来只是"次要按钮"，
+   空态下用户会去点，点完被告知"请先打开视频"。 */
 QPushButton#Primary:disabled {
-    background: #A9C2F5;
-    border-color: #A9C2F5;
-    color: #FFFFFF;
+    background: #F2F3F5;
+    border-color: #E5E6EB;
+    color: #C0C4CC;
 }
 
 QPushButton#Danger {

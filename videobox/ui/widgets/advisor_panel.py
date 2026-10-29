@@ -54,6 +54,33 @@ def _label_cell(text: str, widget: QWidget) -> QVBoxLayout:
     return cell
 
 
+def _step_row(no: str, text: str, optional: bool) -> QWidget:
+    """空态里的一步：圆序号 + 一句话。
+
+    序号独立成一个小圆，而不是写成"1."开头——
+    扫视时圆圈是天然的锚点，段落里的字只能逐字读。
+    """
+    row = QWidget()
+    line = QHBoxLayout(row)
+    line.setContentsMargins(0, 0, 0, 0)
+    line.setSpacing(10)
+
+    badge = QLabel(no)
+    badge.setObjectName("StepNo")
+    badge.setFixedSize(22, 22)
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    line.addWidget(badge, alignment=Qt.AlignmentFlag.AlignTop)
+
+    body = QLabel(text + (
+        '<span style="color:#A9AEB8">　（可以跳过）</span>' if optional else ""
+    ))
+    body.setObjectName("Step")
+    body.setTextFormat(Qt.TextFormat.RichText)
+    body.setWordWrap(True)
+    line.addWidget(body, 1)
+    return row
+
+
 class AdvisorPanel(QFrame):
     request_summary = Signal(str)   # 用户点了"获取建议"
     plan_changed = Signal()         # 参数被手动改动
@@ -80,11 +107,17 @@ class AdvisorPanel(QFrame):
         root.addLayout(head)
 
         # ---- 人话输入 ----
-        hint = QLabel("用一句话说清你要拿这个视频干什么")
-        hint.setObjectName("Hint")
-        root.addWidget(hint)
+        self.input_hint = QLabel("用一句话说清你要拿这个视频干什么")
+        self.input_hint.setObjectName("Hint")
+        root.addWidget(self.input_hint)
 
-        row = QHBoxLayout()
+        # 输入行包一层：空态要连它一起收起来。
+        # 没有视频时问顾问是没有意义的（顾问要先读视频信息才能答），
+        # 让输入框灰着等人、点一下再回"请先打开视频"，是把一句话的活
+        # 拆成两次拒绝。
+        self.input_host = QWidget()
+        row = QHBoxLayout(self.input_host)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
         self.request_edit = QLineEdit()
         self.request_edit.setPlaceholderText("例如：发微信朋友圈，别超过 20MB")
@@ -93,7 +126,7 @@ class AdvisorPanel(QFrame):
         self.ask_btn = QPushButton("获取建议")
         self.ask_btn.clicked.connect(self._emit_request)
         row.addWidget(self.ask_btn)
-        root.addLayout(row)
+        root.addWidget(self.input_host)
 
         self.preset_label = QLabel("载入视频后自动生成方案")
         self.preset_label.setObjectName("Muted")
@@ -107,6 +140,14 @@ class AdvisorPanel(QFrame):
         root.addWidget(self.notice_label)
 
         # ---- 第一层参数：全是档位，没有裸数字 ----
+        # 包一层 host 是为了空态能整体收起。只在里面 setEnabled(False) 是不够的：
+        # 六个灰框还摆在那儿，里面还显示着 mp4 / 原画 / 极佳，
+        # 看上去像"已经配好了"，实际一个都点不动。
+        self.params_host = QWidget()
+        params_host_layout = QVBoxLayout(self.params_host)
+        params_host_layout.setContentsMargins(0, 0, 0, 0)
+        params_host_layout.setSpacing(0)
+
         params = QGridLayout()
         params.setHorizontalSpacing(10)
         params.setVerticalSpacing(9)
@@ -147,7 +188,48 @@ class AdvisorPanel(QFrame):
             params.addLayout(_label_cell(label, widget), r, c)
         params.setColumnStretch(0, 1)
         params.setColumnStretch(1, 1)
-        root.addLayout(params)
+        params_host_layout.addLayout(params)
+        root.addWidget(self.params_host)
+
+        # ---- 空态：告诉用户从哪开始，而不是留一堆点不动的控件 ----
+        # 参考的是"步骤引导"而不是"更详尽的说明"：用户此刻缺的不是知识，
+        # 是下一步该做什么。
+        self.steps_host = QWidget()
+        steps_outer = QVBoxLayout(self.steps_host)
+        steps_outer.setContentsMargins(0, 0, 0, 0)
+        # 上下都留白、上少下多：卡片落在偏上三分之一处，
+        # 视线从标题往下一扫就能撞上它，不需要在整屏空白里找
+        steps_outer.addStretch(1)
+
+        guide = QFrame()
+        guide.setObjectName("EmptyGuide")
+        steps = QVBoxLayout(guide)
+        steps.setContentsMargins(28, 26, 28, 26)
+        steps.setSpacing(15)
+
+        steps_title = QLabel("从这三步开始")
+        steps_title.setObjectName("StepTitle")
+        steps.addWidget(steps_title)
+
+        for no, text, optional in (
+            ("1", "拖一个视频进来，或点左上角「打开文件」", False),
+            ("2", "说一句你要拿去干什么，比如「发朋友圈，别超过 20MB」", True),
+            ("3", "点「开始转码」，转好的文件就在原文件旁边", False),
+        ):
+            steps.addWidget(_step_row(no, text, optional))
+
+        steps_foot = QLabel(
+            "参数不用你算。载入后会自动给一个能用的方案，"
+            "每一项都写着「这样设会得到什么」，随时能改。"
+        )
+        steps_foot.setObjectName("Hint")
+        steps_foot.setWordWrap(True)
+        steps.addSpacing(2)
+        steps.addWidget(steps_foot)
+
+        steps_outer.addWidget(guide)
+        steps_outer.addStretch(2)
+        root.addWidget(self.steps_host, 1)
 
         for widget in (self.container_box, self.scale_box,
                        self.quality_box, self.audio_box):
@@ -175,9 +257,15 @@ class AdvisorPanel(QFrame):
         # ---- 第二层：高级设置（默认折叠） ----
         self.detail_toggle = QToolButton()
         self.detail_toggle.setObjectName("DetailToggle")
-        self.detail_toggle.setText("高级设置：精调参数与命令")
+        # 文案直接列出点开能改什么，而不是给一个抽象分类名。
+        # "高级设置"四个字说完，用户仍然不知道里面有没有他要找的东西；
+        # 列出来他才能判断"要不要点"——不点也是一种正确的选择。
+        self.detail_toggle.setText(
+            "更多参数与命令（编码器 · CRF · 帧率 · 旋转 · ffmpeg 命令）"
+        )
         self.detail_toggle.setToolTip(
-            "CRF、帧率、采样率、声道、旋转都在这里。日常使用不需要打开。"
+            "想精调就在这里：CRF 具体数值、帧率、音频编码与采样率、旋转、"
+            "以及将要执行的完整命令。日常使用不需要打开。"
         )
         self.detail_toggle.setCheckable(True)
         self.detail_toggle.setArrowType(Qt.ArrowType.RightArrow)
@@ -347,14 +435,20 @@ class AdvisorPanel(QFrame):
         self.audio_box.blockSignals(False)
 
     def _set_plan_area_visible(self, visible: bool) -> None:
-        """空状态把整个方案区收起来。
+        """有方案就显示参数与说明，没方案就显示三步引导，两者互斥。
 
-        留着"这样设置的效果"标题和折叠按钮、下面却没有内容，
-        比什么都不显示更让人以为界面坏了。
+        中间的"参数灰着、引导也在"是最差的一种：右栏被塞满，
+        而且能看见却点不动，比看不见更让人以为界面坏了。
         """
-        for widget in (self.effect_title, self.effects_host, self.detail_toggle):
+        for widget in (self.input_hint, self.input_host, self.preset_label,
+                       self.params_host, self.effect_title,
+                       self.effects_host, self.detail_toggle):
             widget.setVisible(visible)
+        # 还没方案时显示"AI 顾问 / 本地规则"是在描述一个不存在的东西
+        self.badge.setVisible(visible)
+        self.steps_host.setVisible(not visible)
         if not visible:
+            self.notice_label.setVisible(False)
             self.detail_box.setVisible(False)
             self.stale_hint.setVisible(False)
 

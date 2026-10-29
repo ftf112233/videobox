@@ -66,6 +66,9 @@ def main() -> int:
         "--windowed", "--onedir", "--name", "VideoBox",
         "--add-data", "videobox/ui/style.qss;videobox/ui",
         "--add-data", "videobox/ui/app.ico;videobox/ui",
+        # 数值框上下箭头。少了它界面不会崩，只是箭头变空白——
+        # QSS 里 url() 指向不存在的文件时 Qt 静默跳过，最容易被漏掉的那种。
+        "--add-data", "videobox/ui/assets;videobox/ui/assets",
         "--add-binary", "vendor/ffmpeg.exe;resources/ffmpeg",
     ]
     # 这个 --icon 决定 exe 在资源管理器里长什么样；
