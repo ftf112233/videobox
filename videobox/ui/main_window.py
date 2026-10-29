@@ -31,7 +31,8 @@ from ..core.probe import probe as probe_video
 from ..core.progress import format_eta
 from ..infra.advisor import Advisor
 from ..infra.ffmpeg_bin import (
-    Binaries, CodecProbe, available_from, find_binaries, probe_all, summary_line,
+    Binaries, CodecProbe, available_from, find_binaries, probe_all,
+    summary_detail, summary_line,
 )
 from ..infra.llm_client import LLMClient
 from ..infra.logging_setup import app_data_dir, log_dir
@@ -265,8 +266,14 @@ class MainWindow(QMainWindow):
 
         self.available_codecs = available_from(probes)
         self.advisor_panel.set_codec_text(choose_codec("auto", self.available_codecs))
+        # 状态栏只留两条最短的信息。ffmpeg 从哪来、显卡为什么没启用，
+        # 都属于"想问才看"的东西——挂在状态栏上，用户第一眼就是一句
+        # 他既解决不了也不关心的报错。
         self.status_label.setText(
-            f"{summary_line(probes)}　|　{self.advisor.mode_label}　|　{self.binaries.source}"
+            f"{summary_line(probes)}　|　{self.advisor.mode_label}"
+        )
+        self.status_label.setToolTip(
+            f"{summary_detail(probes)}\n\nffmpeg 来源：{self.binaries.source}"
         )
         log.info("环境就绪：%s；可用编码器 %s", binarires.source, self.available_codecs)
 

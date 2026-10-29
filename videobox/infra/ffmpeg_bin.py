@@ -187,7 +187,13 @@ def available_from(probes: list[CodecProbe]) -> list[str]:
 
 
 def summary_line(probes: list[CodecProbe]) -> str:
-    """一行摘要，给状态栏用。"""
+    """一行摘要，给状态栏用。
+
+    只说到"用什么在转"，不解释为什么。上一版把失败原因整句塞进状态栏，
+    空状态下用户第一眼看到的是「显卡驱动版本过低，需要更新到 610.00」——
+    他既没法解决，也会以为软件有问题。原因挪到 summary_detail()，只在
+    悬停时出现。
+    """
     if not probes:
         return "未探测编码器"
     good = [p for p in probes if p.ok]
@@ -195,8 +201,28 @@ def summary_line(probes: list[CodecProbe]) -> str:
         return "无可用编码器"
     best = good[0]
     if best.codec == "libx264":
-        failed = [p for p in probes if not p.ok and p.codec != "libx264"]
-        if failed:
-            return f"使用 CPU 编码（{failed[0].label}：{failed[0].reason}）"
-        return "使用 CPU 编码"
-    return f"使用 {best.label} 硬件加速"
+        return "CPU 编码"
+    return best.label
+
+
+def summary_detail(probes: list[CodecProbe]) -> str:
+    """为什么选这个编码器——给悬停提示用。
+
+    想问的人会悬停，不想知道的人不该被这句话挡住界面。
+    """
+    if not probes:
+        return "还没有探测过编码器。"
+    good = [p for p in probes if p.ok]
+    if not good:
+        return "没有找到能用的编码器，转码可能会失败。"
+    best = good[0]
+    if best.codec != "libx264":
+        return f"正在用 {best.label}，速度比纯 CPU 快。"
+
+    failed = [p for p in probes if not p.ok and p.codec != "libx264"]
+    if failed:
+        return (
+            f"{failed[0].label} 没能启用：{failed[0].reason}\n"
+            "改用 CPU 编码，速度慢一些，但任何机器上都能跑。"
+        )
+    return "这台机器没有可用的硬件编码，用 CPU 编码，最稳。"
