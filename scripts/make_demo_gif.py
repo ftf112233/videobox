@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtCore import QSettings, Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from videobox.app import install_excepthook, load_stylesheet  # noqa: E402
@@ -109,8 +109,11 @@ def main() -> int:
     load_stylesheet(app)
     install_excepthook(app)
 
+    QSettings("VideoBox", "VideoBox").remove("window/geometry")
     window = MainWindow()
-    window.resize(1180, 820)
+    # 先退出最大化再 resize：最大化状态下 resize 会被忽略
+    window.setWindowState(Qt.WindowState.WindowNoState)
+    window.resize(1180, 900)
     window.show()
 
     driver = RecordingDriver(window, video, request)

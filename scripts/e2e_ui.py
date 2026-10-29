@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QSettings, QTimer  # noqa: E402
+from PySide6.QtCore import QSettings, Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from videobox.app import install_excepthook, load_stylesheet  # noqa: E402
@@ -94,9 +94,9 @@ class Driver:
             print(f"      方案：{plan.preset_name} / {plan.scale} / q={plan.quality_value}")
             # 先把"方案就绪、尚未开始"这一帧截下来，再启转码。
             # 反过来的话截到的是进度 0% + 取消按钮，看着像卡住了。
-            QTimer.singleShot(400, lambda: self._shot("03_advised"))
+            QTimer.singleShot(400, self._shoot_plan_states)
             self.stage = "starting"
-            self.advance_at = self.ticks + 5
+            self.advance_at = self.ticks + 12
             return
 
         if self.stage == "starting":
@@ -117,6 +117,16 @@ class Driver:
 
         if self.stage == "shooting":
             return
+
+    def _shoot_plan_states(self) -> None:
+        """折叠态和展开态各截一张：README 要说明界面的两层结构。"""
+        self._shot("03_advised")
+        self.w.advisor_panel.detail_toggle.setChecked(True)
+        QTimer.singleShot(700, self._shoot_advanced)
+
+    def _shoot_advanced(self) -> None:
+        self._shot("05_advanced")
+        self.w.advisor_panel.detail_toggle.setChecked(False)
 
     def _shot(self, name: str) -> None:
         SHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -143,11 +153,16 @@ def main() -> int:
     load_stylesheet(app)
     install_excepthook(app)
 
-    # 截图要可复现：清掉上次运行留在输入框里的需求，
-    # 否则空状态截图会带着一句历史文案，看着像没清干净
-    QSettings("VideoBox", "VideoBox").remove("session/last_request")
+    # 截图要可复现：清掉上次运行留下的输入和窗口几何。
+    # 不清几何的话，一次最大化之后所有截图都是 2048 宽，
+    # 缩到 880 的 GIF 里字全糊了
+    settings = QSettings("VideoBox", "VideoBox")
+    settings.remove("session/last_request")
+    settings.remove("window/geometry")
 
     window = MainWindow()
+    window.setWindowState(Qt.WindowState.WindowNoState)
+    window.resize(1180, 900)
     window.show()
 
     driver = Driver(window, video, request)
