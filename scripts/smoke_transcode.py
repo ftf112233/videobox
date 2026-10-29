@@ -67,7 +67,9 @@ def main() -> int:
     print(f"参数     : {plan.container} / {plan.scale} / q={plan.quality_value} / "
           f"a={plan.audio_bitrate_kbps}k" + (f" / 目标 {plan.target_size_mb}MB" if plan.target_size_mb else ""))
     for r in plan.reasons:
-        print(f"  · {r['param']}: {r['why']}")
+        print(f"  · {r}")
+    for risk in plan.risks:
+        print(f"  ⚠ {risk}")
 
     codec = choose_codec(plan.video_codec, codecs)
     out_path = str(ROOT / "tests" / "fixtures" / f"out_{Path(video).stem}.mp4")

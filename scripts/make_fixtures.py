@@ -35,11 +35,15 @@ def _run(ffmpeg: str, args: list[str], out: Path) -> None:
     subprocess.run([ffmpeg, "-v", "error", "-y", *args, str(out)], check=True)
 
 
-def build_demo(ffmpeg: str, out: Path) -> None:
+def build_demo(ffmpeg: str, out: Path, height: int = 1080, crf: int = 14) -> None:
     """三幕短片：标题卡 → 内容卡 → 结尾卡，中间交叉淡化。
 
     每一幕单独编码再 xfade 拼，比一条巨型 filtergraph 好调试：
     画面不对时能直接看出是哪一幕的问题。
+
+    height/crf 收成参数，是为了用同一套画面产出两种素材：
+    1080p 高码率版给演示 GIF 用（源文件要够大才压得动），
+    720p 低码率版放仓库里当试用样片（体积要够小才进得了 git）。
     """
     tmp = ROOT / "build" / "demo_scenes"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -58,7 +62,7 @@ def build_demo(ffmpeg: str, out: Path) -> None:
         ":fontcolor=0x94A3B8:fontsize=38:x=(w-text_w)/2:y=570"
         ":alpha='min(1,max(0,(t-1.0)/0.8))',"
         # 页脚：让片头看起来是"做过设计"的，而不是一块空黑底
-        f"drawtext=fontfile='{FONT_REG}':text='1080p · 30fps · H.264'"
+        f"drawtext=fontfile='{FONT_REG}':text='{height}p · 30fps · H.264'"
         ":fontcolor=0x475569:fontsize=26:x=(w-text_w)/2:y=930"
         ":alpha='min(1,max(0,(t-1.4)/0.8))',"
         "format=yuv420p"
@@ -124,7 +128,7 @@ def build_demo(ffmpeg: str, out: Path) -> None:
         "[0:v][1:v]xfade=transition=fade:duration=0.6:offset=3.4[v01];"
         "[v01][2:v]xfade=transition=fade:duration=0.6:offset=6.8[vx];"
         # 轻微胶片颗粒：让码率贴近真实拍摄素材，否则纯色块压出来小得不像话
-        "[vx]noise=alls=5:allf=t+u,format=yuv420p[v]"
+        f"[vx]noise=alls=5:allf=t+u,scale=-2:{height},format=yuv420p[v]"
     )
     _run(
         ffmpeg,
@@ -137,7 +141,7 @@ def build_demo(ffmpeg: str, out: Path) -> None:
             "-filter_complex", graph,
             "-map", "[v]", "-map", "3:a",
             "-af", "afade=t=in:st=0:d=1,afade=t=out:st=9.5:d=1.5",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "14",
+            "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", "-shortest",
         ],
@@ -188,6 +192,18 @@ def main() -> int:
         "-f", "lavfi", "-i", "testsrc=size=854x480:rate=25:duration=5",
         "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
     ], force)
+
+    # 仓库自带的试用样片：同一段画面，720p + 较低码率，控制在 10MB 以内。
+    # 码率不能压太狠：太小的源文件会让"压到 20MB"落到"目标比源还大"的分支，
+    # 主力场景反而演示不出来。
+    # 有了它，clone 下来不装 ffmpeg 也能立刻拖个真视频进软件试。
+    portable = ROOT / "docs" / "sample.mp4"
+    if portable.exists() and not force:
+        print("  已存在，跳过：docs/sample.mp4")
+    else:
+        print("  生成 docs/sample.mp4 …")
+        build_demo(bins.ffmpeg, portable, height=720, crf=17)
+        print(f"    → {portable.stat().st_size / 1024 / 1024:.1f} MB")
 
     print("完成。")
     return 0

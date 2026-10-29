@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtCore import QSettings, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from videobox.app import install_excepthook, load_stylesheet  # noqa: E402
@@ -64,7 +64,9 @@ class Driver:
             return
 
         if self.stage == "wait_info":
-            if self.w.info is not None:
+            # 还要等默认方案落地：载入后的第一帧应该是"可以开始转码"的状态，
+            # 而不是参数区还灰着、按钮还没亮
+            if self.w.info is not None and self.w.plan is not None:
                 print(f"[3/5] 解析完成：{self.w.info.summary_line()}")
                 QTimer.singleShot(600, lambda: self._shot("02_loaded"))
                 self.stage = "advise"
@@ -76,6 +78,8 @@ class Driver:
                 return
             print(f"[4/5] 请求方案：{self.request!r}")
             self.w.advisor_panel.request_edit.setText(self.request)
+            # 不取消选中，截图里输入框会是一片蓝色高亮，看着像出错
+            self.w.advisor_panel.request_edit.deselect()
             self.w._on_request_summary(self.request)
             self.stage = "wait_plan"
             self.advance_at = self.ticks + 6
@@ -88,7 +92,16 @@ class Driver:
             if busy or plan is None:
                 return
             print(f"      方案：{plan.preset_name} / {plan.scale} / q={plan.quality_value}")
+            # 先把"方案就绪、尚未开始"这一帧截下来，再启转码。
+            # 反过来的话截到的是进度 0% + 取消按钮，看着像卡住了。
             QTimer.singleShot(400, lambda: self._shot("03_advised"))
+            self.stage = "starting"
+            self.advance_at = self.ticks + 5
+            return
+
+        if self.stage == "starting":
+            if self.ticks < getattr(self, "advance_at", 0):
+                return
             print("[5/5] 开始转码")
             self.w._start_transcode()
             self.stage = "wait_done"
@@ -129,6 +142,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     load_stylesheet(app)
     install_excepthook(app)
+
+    # 截图要可复现：清掉上次运行留在输入框里的需求，
+    # 否则空状态截图会带着一句历史文案，看着像没清干净
+    QSettings("VideoBox", "VideoBox").remove("session/last_request")
 
     window = MainWindow()
     window.show()
