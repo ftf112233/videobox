@@ -1,0 +1,460 @@
+"""主窗口：把探测、顾问、转码、进度串成一条用户能走通的动线。
+
+动线刻意模仿桌面转换器的常规布局（左侧看素材、右侧调参数、底部看进度），
+因为笔试题第 7 条要求"设计目标是给人用"——用户对这类软件的肌肉记忆
+比任何原创布局都值钱。
+
+状态机只有四个：空 → 已载入 → 转码中 → 完成/失败。
+转码中禁用所有会改变输入的控件，避免用户改到一半参数变了还不自知。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QImage
+from PySide6.QtWidgets import (
+    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout,
+    QWidget,
+)
+
+from ..core import thumb as thumb_mod
+from ..core.models import TranscodePlan, VideoInfo
+from ..core.params import build_args, build_preview_command, choose_codec
+from ..core.probe import probe as probe_video
+from ..core.progress import format_eta
+from ..infra.advisor import Advisor
+from ..infra.ffmpeg_bin import (
+    Binaries, CodecProbe, available_from, find_binaries, probe_all, summary_line,
+)
+from ..infra.llm_client import LLMClient
+from ..infra.logging_setup import app_data_dir, log_dir
+from ..infra.process import TranscodeRunner
+from . import tasks
+from .widgets.advisor_panel import AdvisorPanel
+from .widgets.info_panel import InfoPanel
+from .widgets.progress_panel import ProgressPanel
+
+log = logging.getLogger(__name__)
+
+VIDEO_SUFFIXES = {
+    ".mp4", ".mkv", ".mov", ".avi", ".flv", ".wmv", ".webm",
+    ".m4v", ".ts", ".mpg", ".mpeg", ".3gp", ".rmvb",
+}
+
+CONFIG_PATH = app_data_dir() / "config.json"
+
+
+def load_config() -> dict:
+    """读本地配置（API Key 等）。读不到就返回空，绝不抛错。"""
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def resolve_api_key(cfg: dict) -> str:
+    """环境变量优先于配置文件，方便临时切换。"""
+    return (
+        os.environ.get("DEEPSEEK_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or str(cfg.get("api_key", ""))
+    ).strip()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("VideoBox · AI 视频转码器")
+        self.resize(1180, 760)
+        self.setAcceptDrops(True)
+
+        self.binaries = Binaries(ffmpeg="", ffprobe=None, source="未探测")
+        self.probes: list[CodecProbe] = []
+        self.available_codecs: list[str] = ["libx264"]
+        self.info: VideoInfo | None = None
+        self.plan: TranscodePlan | None = None
+        self.runner: TranscodeRunner | None = None
+        self.worker_refs: list = []
+        self.retry_done = False
+
+        cfg = load_config()
+        self.client = LLMClient(api_key=resolve_api_key(cfg))
+        self.advisor = Advisor(self.client)
+
+        self._build_ui()
+        self._build_menu()
+        self._boot_environment()
+
+    # ================= UI 组装 =================
+    def _build_ui(self) -> None:
+        root = QWidget()
+        root.setObjectName("Root")
+        self.setCentralWidget(root)
+
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(16, 14, 16, 12)
+        outer.setSpacing(12)
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        self.info_panel = InfoPanel()
+        body.addWidget(self.info_panel, 0)
+
+        right = QVBoxLayout()
+        right.setSpacing(12)
+        self.advisor_panel = AdvisorPanel()
+        right.addWidget(self.advisor_panel, 1)
+        body.addLayout(right, 1)
+
+        outer.addLayout(body, 1)
+
+        self.progress_panel = ProgressPanel()
+        outer.addWidget(self.progress_panel)
+
+        # ---- 信号 ----
+        self.advisor_panel.request_summary.connect(self._on_request_summary)
+        self.advisor_panel.plan_changed.connect(self._refresh_command)
+        self.progress_panel.start_clicked.connect(self._start_transcode)
+        self.progress_panel.cancel_clicked.connect(self._cancel_transcode)
+
+        self.status_label = QLabel("正在初始化…")
+        self.statusBar().addWidget(self.status_label, 1)
+
+    def _build_menu(self) -> None:
+        bar = self.menuBar()
+
+        file_menu = bar.addMenu("文件")
+        open_action = QAction("打开视频…", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self._pick_file)
+        file_menu.addAction(open_action)
+
+        open_output = QAction("打开输出目录", self)
+        open_output.triggered.connect(self._open_output_dir)
+        file_menu.addAction(open_output)
+        file_menu.addSeparator()
+
+        quit_action = QAction("退出", self)
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        tools_menu = bar.addMenu("工具")
+        log_action = QAction("打开日志目录", self)
+        log_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))
+        )
+        tools_menu.addAction(log_action)
+
+        recheck = QAction("重新探测硬件编码器", self)
+        recheck.triggered.connect(self._boot_environment)
+        tools_menu.addAction(recheck)
+
+        help_menu = bar.addMenu("帮助")
+        about = QAction("关于", self)
+        about.triggered.connect(self._show_about)
+        help_menu.addAction(about)
+
+    def _show_about(self) -> None:
+        QMessageBox.information(
+            self,
+            "关于 VideoBox",
+            "VideoBox · AI 视频转码器\n\n"
+            "基于 PySide6（Qt for Python）+ FFmpeg 命令行。\n"
+            "AI 参数顾问：DeepSeek（可无 Key 降级为本地规则引擎）。\n\n"
+            f"当前模式：{self.advisor.mode_label}",
+        )
+
+    # ================= 启动探测 =================
+    def _boot_environment(self) -> None:
+        self.status_label.setText("正在查找 ffmpeg 并实测编码器…")
+        self.worker_refs.append(
+            tasks.submit(
+                self._probe_environment,
+                on_done=self._on_environment_ready,
+                on_error=lambda msg: self._fatal(f"环境检查失败：{msg}"),
+            )
+        )
+
+    def _probe_environment(self):
+        bins = find_binaries()
+        if not bins.ok:
+            return bins, []
+        return bins, probe_all(bins.ffmpeg)
+
+    def _on_environment_ready(self, payload) -> None:
+        binarires, probes = payload
+        self.binaries = binarires
+        self.probes = probes
+
+        if not binarires.ok:
+            self._fatal(
+                "找不到 ffmpeg。\n\n"
+                "请把 ffmpeg.exe 放到以下任一位置后重试：\n"
+                "  · 程序目录下的 resources\\ffmpeg\\\n"
+                "  · D:\\develop\\ffmpeg\\bin\\\n"
+                "  · 或加入系统 PATH"
+            )
+            return
+
+        self.available_codecs = available_from(probes)
+        self.advisor_panel.set_codec_text(choose_codec("auto", self.available_codecs))
+        self.status_label.setText(
+            f"{summary_line(probes)}　|　{self.advisor.mode_label}　|　{self.binaries.source}"
+        )
+        log.info("环境就绪：%s；可用编码器 %s", binarires.source, self.available_codecs)
+
+    def _fatal(self, message: str) -> None:
+        log.error(message.replace("\n", " "))
+        self.status_label.setText("环境异常")
+        self.progress_panel.show_error(message)
+
+    # ================= 打开文件 =================
+    def _pick_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择视频文件", "",
+            "视频文件 (*.mp4 *.mkv *.mov *.avi *.flv *.wmv *.webm *.ts *.m4v *.3gp);;所有文件 (*.*)",
+        )
+        if path:
+            self._load_video(path)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt 命名
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if Path(url.toLocalFile()).suffix.lower() in VIDEO_SUFFIXES:
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 - Qt 命名
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if Path(path).suffix.lower() in VIDEO_SUFFIXES:
+                self._load_video(path)
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def _load_video(self, path: str) -> None:
+        if self.runner is not None:
+            QMessageBox.information(self, "请稍等", "正在转码中，请先取消当前任务。")
+            return
+
+        self.info = None
+        self.plan = None
+        self.retry_done = False
+        self.info_panel.reset()
+        self.advisor_panel.reset()
+        self.progress_panel.set_idle()
+        self.progress_panel.show_note(f"正在读取 {Path(path).name}…")
+        self.status_label.setText("正在解析视频信息…")
+
+        self.worker_refs.append(
+            tasks.submit(
+                self._load_video_bg, path,
+                on_done=lambda payload: self._on_video_loaded(path, payload),
+                on_error=lambda msg: self.progress_panel.show_error(f"无法读取该文件：{msg}"),
+            )
+        )
+
+    def _load_video_bg(self, path: str):
+        """后台线程：解析信息 + 抽缩略图。返回 QImage（不能返回 QPixmap）。"""
+        info = probe_video(path, self.binaries.ffprobe, self.binaries.ffmpeg)
+        image: QImage | None = None
+        if self.binaries.ffmpeg and info.has_video:
+            at = thumb_mod.pick_thumb_time(info.duration_sec)
+            mtime = Path(path).stat().st_mtime
+            thumb_path = thumb_mod.extract(
+                self.binaries.ffmpeg, path, app_data_dir() / "cache", at, mtime
+            )
+            if thumb_path:
+                img = QImage(thumb_path)
+                image = img if not img.isNull() else None
+        return info, image
+
+    def _on_video_loaded(self, path: str, payload) -> None:
+        info, image = payload
+        self.info = info
+        self.info_panel.show_info(info)
+        self.info_panel.show_thumbnail(image)
+        self.status_label.setText(f"已载入：{Path(path).name}　|　{info.summary_line()}")
+
+        # 载入后立刻给一个默认方案，用户不填需求也能直接转。
+        # 这里必须兜住异常：顾问挂了不能连累"文件已载入"这件已完成的事，
+        # 否则用户会看到一个读出了信息、却完全不能操作的界面。
+        try:
+            plan, warnings, used_ai = self.advisor.advise("", info, self.available_codecs)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("默认方案生成失败，使用兜底计划")
+            plan, warnings, used_ai = TranscodePlan(), [f"默认方案生成失败：{exc}"], False
+        self.plan = plan
+        self.advisor_panel.apply_plan(plan, warnings, used_ai)
+        self._refresh_command()
+        self.progress_panel.show_note("方案已就绪，可以直接开始转码；也可以在右上输入你的用途来调整。")
+
+    # ================= 方案 =================
+    def _on_request_summary(self, text: str) -> None:
+        if not self.info:
+            self.progress_panel.show_note("请先打开一个视频文件。")
+            return
+        self.advisor_panel.set_busy(True)
+        self.status_label.setText("参数顾问思考中…")
+        self.worker_refs.append(
+            tasks.submit(
+                self.advisor.advise, text, self.info, self.available_codecs,
+                on_done=self._on_advice,
+                on_error=self._on_advice_error,
+            )
+        )
+
+    def _on_advice(self, payload) -> None:
+        plan, warnings, used_ai = payload
+        self.advisor_panel.set_busy(False)
+        self.plan = plan
+        self.advisor_panel.apply_plan(plan, warnings, used_ai)
+        self._refresh_command()
+        self.status_label.setText(
+            f"方案来源：{'AI 顾问' if used_ai else '本地规则'}　|　{plan.preset_name}"
+        )
+
+    def _on_advice_error(self, message: str) -> None:
+        self.advisor_panel.set_busy(False)
+        self.progress_panel.show_note(f"顾问不可用，已保留原方案（{message}）")
+
+    def _current_plan(self) -> TranscodePlan | None:
+        """把界面上用户的手动修改合并进当前方案。"""
+        if not self.plan:
+            return None
+        merged = TranscodePlan(**self.plan.to_dict())
+        for key, value in self.advisor_panel.current_overrides().items():
+            setattr(merged, key, value)
+        return merged
+
+    def _output_path(self) -> str:
+        assert self.info
+        src = Path(self.info.path)
+        plan = self._current_plan()
+        suffix = f".{plan.container}" if plan else ".mp4"
+        return str(src.with_name(f"{src.stem}_converted{suffix}"))
+
+    def _refresh_command(self) -> None:
+        plan = self._current_plan()
+        if not plan or not self.info:
+            return
+        try:
+            cmd = build_preview_command(
+                plan, self.info, self.info.path, self._output_path(),
+                self.available_codecs,
+            )
+        except Exception as exc:  # noqa: BLE001 - 预览失败不该拦住用户
+            log.warning("命令预览失败：%s", exc)
+            return
+        self.advisor_panel.show_command(cmd)
+        codec = choose_codec(plan.video_codec, self.available_codecs)
+        self.advisor_panel.set_codec_text(codec)
+
+    # ================= 转码 =================
+    def _start_transcode(self) -> None:
+        if not self.info or not self.binaries.ok:
+            self.progress_panel.show_note("请先打开一个视频文件。")
+            return
+        plan = self._current_plan()
+        if not plan:
+            self.progress_panel.show_note("还没有可用方案，请先获取建议。")
+            return
+
+        self.retry_done = False
+        self._launch(plan, force_codec=None)
+
+    def _launch(self, plan: TranscodePlan, force_codec: str | None) -> None:
+        assert self.info
+        codec = force_codec or choose_codec(plan.video_codec, self.available_codecs)
+        if force_codec:
+            plan = TranscodePlan(**plan.to_dict())
+            plan.video_codec = force_codec
+
+        out_path = self._output_path()
+        try:
+            args = build_args(plan, self.info, self.info.path, out_path, [codec])
+        except Exception as exc:  # noqa: BLE001
+            self.progress_panel.show_error(f"参数构造失败：{exc}")
+            return
+
+        codec_label = "CPU 软件编码" if codec == "libx264" else "NVIDIA 硬件编码"
+        self.progress_panel.set_running(codec_label)
+        self.status_label.setText(f"转码中… → {out_path}")
+
+        runner = TranscodeRunner(
+            ffmpeg=self.binaries.ffmpeg,
+            args=args,
+            input_path=self.info.path,
+            output_path=out_path,
+            duration_sec=self.info.duration_sec,
+            used_codec=codec,
+            parent=self,
+        )
+        runner.progressed.connect(self._on_progress)
+        runner.log_line.connect(lambda line: log.debug("[ffmpeg] %s", line))
+        runner.finished.connect(self._on_transcode_finished)
+        self.runner = runner
+        self._last_plan = plan
+        runner.start()
+
+    def _on_progress(self, update) -> None:
+        self.progress_panel.update_progress(
+            update.percent, format_eta(update.eta_sec), update.speed
+        )
+
+    def _cancel_transcode(self) -> None:
+        if self.runner:
+            self.runner.cancel()
+            self.progress_panel.cancel_btn.setEnabled(False)
+            self.progress_panel.show_note("正在安全取消（等待 ffmpeg 收尾）…")
+
+    def _on_transcode_finished(self, result) -> None:
+        codec = result.used_codec
+        codec_label = "CPU 软件编码" if codec == "libx264" else "NVIDIA 硬件编码"
+        self.runner = None
+
+        # 硬件编码失败自动降级重试一次——这是真实产品该有的容错
+        if (
+            not result.ok
+            and not result.cancelled
+            and codec != "libx264"
+            and not self.retry_done
+        ):
+            self.retry_done = True
+            log.warning("硬件编码失败，降级到 libx264 重试：%s", result.error_message)
+            self.progress_panel.show_note("硬件编码失败，正在自动切换到 CPU 编码重试…")
+            QTimer.singleShot(200, lambda: self._launch(self._last_plan, "libx264"))
+            return
+
+        self.progress_panel.show_result(result, codec_label)
+        if result.ok:
+            self.status_label.setText(f"转码完成：{result.output_path}")
+            log.info(
+                "转码成功 %s → %s，耗时 %.2fs，%s",
+                result.input_size_bytes, result.output_size_bytes,
+                result.elapsed_sec, result.size_delta_label,
+            )
+        elif result.cancelled:
+            self.status_label.setText("已取消")
+        else:
+            self.status_label.setText("转码失败，详见底部提示或日志")
+
+    def _open_output_dir(self) -> None:
+        if not self.info:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.info.path).parent)))
+
+    # ================= 收尾 =================
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        if self.runner:
+            self.runner.cancel()
+        super().closeEvent(event)

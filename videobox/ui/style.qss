@@ -1,0 +1,326 @@
+/* VideoBox 浅色主题
+   目标不是好看，是"看起来像 2026 年的客户端而不是 1995 年的 MFC 示例"。
+   只用 QSS，不做自绘 —— 两天工期内自绘控件是自杀式投资。 */
+
+* {
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #1F2329;
+}
+
+QMainWindow, QWidget#Root {
+    background: #F5F6F8;
+}
+
+/* ---------- 卡片 ---------- */
+QFrame#Card {
+    background: #FFFFFF;
+    border: 1px solid #E5E6EB;
+    border-radius: 10px;
+}
+
+QLabel#CardTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1F2329;
+    padding-bottom: 2px;
+}
+
+QLabel#Hint {
+    color: #86909C;
+    font-size: 12px;
+}
+
+QLabel#Value {
+    color: #1F2329;
+}
+
+QLabel#Muted {
+    color: #646A73;
+}
+
+/* ---------- 缩略图占位 ---------- */
+QLabel#Thumb {
+    background: #F2F3F5;
+    border: 1px dashed #C9CDD4;
+    border-radius: 8px;
+    color: #86909C;
+    font-size: 13px;
+}
+
+/* ---------- 输入 ---------- */
+QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background: #FFFFFF;
+    border: 1px solid #D9DCE1;
+    border-radius: 6px;
+    /* 显式写全四个方向：只写 padding-right 会把上下内边距一起吃掉，
+       文字会被垂直裁掉半个字（720p 显示成 /20p 就是这个坑） */
+    padding: 7px 10px 7px 10px;
+    min-height: 20px;
+    selection-background-color: #2F6FED;
+    selection-color: #FFFFFF;
+}
+
+QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QComboBox:focus {
+    border: 1px solid #2F6FED;
+}
+
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {
+    background: #F7F8FA;
+    color: #A9AEB8;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+/* 数值框的上下箭头：默认的 Windows 原生箭头又小又糊，
+   换成自绘三角 + 独立按钮区，看起来才像个现代控件 */
+QSpinBox, QDoubleSpinBox {
+    padding: 7px 22px 7px 10px;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: 1px solid #E5E6EB;
+    border-top-right-radius: 5px;
+    background: #F7F8FA;
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 20px;
+    border-left: 1px solid #E5E6EB;
+    border-bottom-right-radius: 5px;
+    background: #F7F8FA;
+}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #EAF1FE;
+}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid #86909C;
+}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #86909C;
+}
+
+QComboBox QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid #E5E6EB;
+    border-radius: 6px;
+    selection-background-color: #EAF1FE;
+    selection-color: #2F6FED;
+    outline: none;
+}
+
+/* ---------- 按钮 ---------- */
+QPushButton {
+    background: #FFFFFF;
+    border: 1px solid #D9DCE1;
+    border-radius: 6px;
+    padding: 8px 16px;
+    color: #1F2329;
+}
+
+QPushButton:hover {
+    border-color: #2F6FED;
+    color: #2F6FED;
+}
+
+QPushButton:pressed {
+    background: #EAF1FE;
+}
+
+QPushButton:disabled {
+    background: #F7F8FA;
+    border-color: #E5E6EB;
+    color: #C0C4CC;
+}
+
+QPushButton#Primary {
+    background: #2F6FED;
+    border: 1px solid #2F6FED;
+    color: #FFFFFF;
+    font-weight: 600;
+    padding: 10px 22px;
+}
+
+QPushButton#Primary:hover {
+    background: #1F5BD6;
+    border-color: #1F5BD6;
+    color: #FFFFFF;
+}
+
+QPushButton#Primary:disabled {
+    background: #A9C2F5;
+    border-color: #A9C2F5;
+    color: #FFFFFF;
+}
+
+QPushButton#Danger {
+    background: #FFFFFF;
+    border: 1px solid #F53F3F;
+    color: #F53F3F;
+    padding: 10px 22px;
+}
+
+QPushButton#Danger:hover {
+    background: #FFECE8;
+}
+
+/* ---------- 进度 ---------- */
+QProgressBar {
+    background: #F2F3F5;
+    border: none;
+    border-radius: 5px;
+    height: 10px;
+    text-align: center;
+    color: transparent;
+}
+
+QProgressBar::chunk {
+    background: #2F6FED;
+    border-radius: 5px;
+}
+
+/* ---------- 理由列表 ---------- */
+QListWidget {
+    background: #FFFFFF;
+    border: none;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 7px 4px;
+    border-bottom: 1px solid #F2F3F5;
+}
+
+QListWidget::item:selected {
+    background: #EAF1FE;
+    color: #1F2329;
+}
+
+/* ---------- 滚动条 ---------- */
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #C9CDD4;
+    border-radius: 4px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #A9AEB8;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+/* ---------- 状态徽章 ---------- */
+QLabel#BadgeAI {
+    background: #EAF1FE;
+    color: #2F6FED;
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+
+QLabel#BadgeLocal {
+    background: #F2F3F5;
+    color: #646A73;
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+
+QLabel#BadgeWarn {
+    background: #FFF7E8;
+    color: #D25F00;
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+
+/* ---------- 结果区 ---------- */
+QLabel#ResultOk {
+    color: #00A55B;
+    font-weight: 600;
+}
+
+QLabel#ResultFail {
+    color: #F53F3F;
+    font-weight: 600;
+}
+
+QLabel#CommandBox {
+    background: #F7F8FA;
+    border: 1px solid #E5E6EB;
+    border-radius: 6px;
+    padding: 8px;
+    color: #4E5969;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 11px;
+}
+
+QMenuBar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E5E6EB;
+}
+
+QMenuBar::item {
+    padding: 6px 12px;
+    background: transparent;
+}
+
+QMenuBar::item:selected {
+    background: #EAF1FE;
+    border-radius: 4px;
+}
+
+QMenu {
+    background: #FFFFFF;
+    border: 1px solid #E5E6EB;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 7px 24px 7px 12px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background: #EAF1FE;
+}
+
+QStatusBar {
+    background: #FFFFFF;
+    border-top: 1px solid #E5E6EB;
+    color: #646A73;
+}

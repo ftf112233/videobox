@@ -1,0 +1,95 @@
+"""应用入口。
+
+三件必做的事：
+1. 装好日志（--noconsole 打包后异常不会弹窗，只能靠日志）
+2. 装好全局异常钩子（否则未捕获异常会让窗口直接消失，用户以为程序坏了）
+3. 加载 QSS（默认 Qt 控件长得像 1995 年，光这一项就决定"给人用"的第一印象）
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+import traceback
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from .infra.logging_setup import setup_logging
+from .ui.main_window import MainWindow
+
+log = logging.getLogger(__name__)
+
+APP_NAME = "VideoBox"
+APP_VERSION = "1.0.0"
+
+
+def _resource_path(relative: str) -> Path:
+    """兼容开发态与 PyInstaller 打包后的资源定位。
+
+    这两种态的目录层级不一样，踩过一次：
+      开发态  → videobox/ui/style.qss
+      打包后  → _internal/videobox/ui/style.qss
+    少一层 videobox 就会在打包后静默退回 Qt 默认外观（窗口还能开，
+    但丑得认不出来），日志里只有一行 WARNING 很容易漏掉。
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "videobox" / relative
+    return Path(__file__).resolve().parent / relative
+
+
+def load_stylesheet(app: QApplication) -> None:
+    qss = _resource_path("ui/style.qss")
+    try:
+        app.setStyleSheet(qss.read_text(encoding="utf-8"))
+    except OSError:
+        log.warning("样式表未找到：%s（将使用 Qt 默认外观）", qss)
+
+
+def install_excepthook(app: QApplication) -> None:
+    """未捕获异常记日志并弹窗，而不是让窗口静默消失。"""
+
+    def handler(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        detail = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log.critical("未捕获异常：\n%s", detail)
+        QMessageBox.critical(
+            None, "程序出错",
+            f"发生了未预期的错误：\n\n{exc_value}\n\n"
+            "详细信息已写入日志（菜单 → 工具 → 打开日志目录）。",
+        )
+
+    sys.excepthook = handler
+
+
+def main() -> int:
+    setup_logging()
+    log.info("=" * 50)
+    log.info("%s v%s 启动，Python %s", APP_NAME, APP_VERSION, sys.version.split()[0])
+    log.info("frozen=%s, cwd=%s", getattr(sys, "frozen", False), Path.cwd())
+
+    # 高 DPI 屏上不设这个，界面会被系统缩放糊成一片
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+
+    load_stylesheet(app)
+    install_excepthook(app)
+
+    window = MainWindow()
+    window.show()
+
+    log.info("主窗口已显示")
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
