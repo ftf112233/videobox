@@ -187,5 +187,48 @@ class TestAdvancedSync(unittest.TestCase):
         self.assertEqual(self.panel.audio_codec_box.currentData(), "mp3")
 
 
+class TestEmptyGuidance(unittest.TestCase):
+    """空状态要给路径，不能给一堆点不动的控件。
+
+    之前空态摆着六个灰掉的下拉框（里面还显示 mp4 / 原画 / 极佳），
+    看着像"已经配好了"，实际一个都点不动。现在换成三步引导。
+    """
+
+    def test_empty_state_shows_steps_and_hides_params(self):
+        panel = AdvisorPanel()
+        self.assertTrue(panel.steps_host.isVisibleTo(panel))
+        self.assertFalse(panel.params_host.isVisibleTo(panel))
+        # 没有视频时问顾问没有意义：输入框该收起来，
+        # 而不是让用户打一句话、点按钮、再被告知"请先打开视频"
+        self.assertFalse(panel.input_host.isVisibleTo(panel))
+        self.assertFalse(panel.badge.isVisibleTo(panel))
+
+    def test_steps_mention_the_optional_shortcut(self):
+        """第二步必须标"可以跳过"。
+
+        不标的话，用户会以为"不说一句话就不能转"，卡在第一步。
+        """
+        from PySide6.QtWidgets import QLabel
+
+        panel = AdvisorPanel()
+        joined = "".join(w.text() for w in panel.steps_host.findChildren(QLabel))
+        self.assertIn("跳过", joined)
+
+    def test_plan_swaps_guidance_for_params(self):
+        panel = AdvisorPanel()
+        panel.apply_plan(make_plan(), [], used_ai=True)
+        self.assertFalse(panel.steps_host.isVisibleTo(panel))
+        self.assertTrue(panel.params_host.isVisibleTo(panel))
+        self.assertTrue(panel.input_host.isVisibleTo(panel))
+        self.assertTrue(panel.badge.isVisibleTo(panel))
+
+    def test_reset_brings_guidance_back(self):
+        panel = AdvisorPanel()
+        panel.apply_plan(make_plan(), [], used_ai=True)
+        panel.reset()
+        self.assertTrue(panel.steps_host.isVisibleTo(panel))
+        self.assertFalse(panel.params_host.isVisibleTo(panel))
+
+
 if __name__ == "__main__":
     unittest.main()
