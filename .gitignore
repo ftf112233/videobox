@@ -1,0 +1,38 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ---- PyInstaller ----
+build/
+dist/
+*.manifest
+# 打包统一走 scripts/build.py，不用 spec 文件，避免两套配置打架
+*.spec
+
+# ---- 第三方二进制（体积太大，不进仓库；由 scripts/setup_ffmpeg.md 说明获取方式）----
+vendor/ffmpeg.exe
+vendor/ffprobe.exe
+vendor/*.zip
+
+# ---- 测试素材（由 scripts/make_fixtures.py 生成，避免仓库臃肿）----
+tests/fixtures/*.mp4
+!tests/fixtures/.gitkeep
+
+# ---- 转码产物 ----
+*_converted.mp4
+*_converted.mkv
+out_*.mp4
+
+# ---- 本地配置与密钥 ----
+.env
+config.json
+*.log
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
