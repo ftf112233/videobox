@@ -197,7 +197,54 @@ system = PLAN_SYSTEM_PROMPT.format(codec_options=..., scale_options=...)
 
 ---
 
-## 五、一句话总结
+## 五、交付阶段又踩了三个坑
+
+写代码的坑在前四节，这一节是"做完之后发不出去"的坑——比写代码更消耗时间。
+
+### 1. Release 显示成功，附件却是空的
+
+`gh release create` 返回了 URL，我当时以为完事了。回头核实：
+
+```
+Draft  v1.0.0  2026-10-29T07:33:15Z     ← 是草稿
+assets: []                              ← 附件没上去
+```
+
+**教训**：CI/CD 里"命令返回 0"和"结果正确"是两件事。凡是有外部副作用的操作，
+都要回头用一个**独立的读操作**验证（这里是 `gh release view --json`）。
+现在把附件重新上传、确认 size=161418115、再把 draft 改成正式版，才算是真的发出去。
+
+### 2. `git push` 反复 502，最后绕道 REST API
+
+推送时不断报 `CONNECT tunnel failed, response 502` / `Empty reply from server`。
+排查顺序：
+1. 以为是代理配置问题 → 关掉代理直连 → `Could not connect`（这台机器直连 GitHub 本来就不通）
+2. 改 `http.version=HTTP/1.1`、调大 `postBuffer` → 无效
+3. 发现 `gh api rate_limit` 一直是通的 → **同一个网络下，git 的 smart HTTP 通道挂了，API 通道活着**
+
+于是改用 REST API 手工完成推送：`POST /git/blobs`（每个文件 base64）→
+`POST /git/trees`（带 base_tree，只放改动的文件）→ `POST /git/commits` →
+`PATCH /git/refs/heads/master`。四步等价于一次 `git push`，副作用是远端多了一个
+内容相同但 SHA 不同的提交，本地 `reset --hard` 对齐即可。
+
+**这不是常规操作**，只在网络受限时用。但它说明一件事：知道工具在协议层做了什么，
+才有条件在工具失效时用别的方式达到同样目的。
+
+### 3. 演示 GIF：录屏是错的方向
+
+第一反应是 OBS/ffmpeg gdigrab 录桌面，立刻发现三个问题：会录进任务栏和通知弹窗、
+DPI 缩放导致裁剪偏移、换台机器就不可复现。
+
+改成**应用进程内按帧 `grab()` 窗口**，再交给 ffmpeg 两遍法（`palettegen` + `paletteuse`）合成。
+好处是像素干净、尺寸固定、每次跑都是同一套真流程。
+
+中间还错了一次：想用 `fps=3` 把 4.7 秒的流程放慢，结果时长还是 4.66 秒——
+`fps` 滤镜只丢帧、**不拉伸时间轴**。正确做法是把**输入帧率**设成 3，让每帧停留 1/3 秒。
+这是唯一一处刻意偏离真实速度的地方，README 里写明了。
+
+---
+
+## 六、一句话总结
 
 AI 能在这个项目里承担大约 70% 的代码量，但它给出的东西**默认是"看起来对"的**。
 这个项目里 7 个真 bug，没有一个是语法错误——全是"逻辑上说得通、跑起来不对"的问题：
