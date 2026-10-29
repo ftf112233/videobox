@@ -39,6 +39,22 @@ QLabel#Muted {
     color: #646A73;
 }
 
+/* 当前方案名：右栏的第二个视觉锚点，参数都是它的注脚 */
+QLabel#PlanName {
+    color: #1F2329;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* 参数和目标打架时的提醒。用浅黄底而不是红色，因为多数情况不是错误 */
+QLabel#Notice {
+    background: #FFF7E8;
+    border: 1px solid #FFE4BA;
+    border-radius: 6px;
+    color: #A64B00;
+    padding: 7px 10px;
+}
+
 /* ---------- 缩略图占位 ---------- */
 QLabel#Thumb {
     background: #F2F3F5;
@@ -200,21 +216,17 @@ QProgressBar::chunk {
     border-radius: 5px;
 }
 
-/* ---------- 理由列表 ---------- */
-QListWidget {
-    background: #FFFFFF;
-    border: none;
-    outline: none;
-}
-
-QListWidget::item {
-    padding: 7px 4px;
-    border-bottom: 1px solid #F2F3F5;
-}
-
-QListWidget::item:selected {
-    background: #EAF1FE;
+/* ---------- 效果说明 ----------
+   正文黑、风险橙。不做卡片也不做图标，因为这几行是"读一遍就懂"的信息，
+   加装饰反而会把它变成需要辨认的东西 */
+QLabel#EffectOk {
     color: #1F2329;
+    font-size: 13px;
+}
+
+QLabel#EffectWarn {
+    color: #A64B00;
+    font-size: 13px;
 }
 
 /* ---------- 滚动条 ---------- */
@@ -286,6 +298,21 @@ QLabel#CommandBox {
     color: #4E5969;
     font-family: "Cascadia Mono", "Consolas", monospace;
     font-size: 11px;
+}
+
+/* ---------- 技术细节折叠按钮 ----------
+   长得像链接而不是按钮：它是个次要入口，不该和"开始转码"抢注意力 */
+QToolButton#DetailToggle {
+    background: transparent;
+    border: none;
+    color: #86909C;
+    font-size: 12px;
+    padding: 4px 0;
+    text-align: left;
+}
+
+QToolButton#DetailToggle:hover {
+    color: #2F6FED;
 }
 
 QMenuBar {

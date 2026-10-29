@@ -23,7 +23,7 @@ from .ui.main_window import MainWindow
 log = logging.getLogger(__name__)
 
 APP_NAME = "VideoBox"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 
 def _resource_path(relative: str) -> Path:

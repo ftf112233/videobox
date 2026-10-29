@@ -93,17 +93,20 @@ class InfoPanel(QFrame):
     def show_info(self, info: VideoInfo) -> None:
         from pathlib import Path
 
+        from ...core import labels
+
         self.filename.setText(Path(info.path).name)
         f = self._fields
         f["duration"].setText(info.duration_label)
         f["resolution"].setText(info.resolution_label)
-        f["fps"].setText(f"{info.fps:.2f} fps" if info.fps else "—")
+        f["fps"].setText(f"{info.fps:.0f} 帧/秒" if info.fps else "—")
         f["size"].setText(info.size_label)
-        f["vcodec"].setText(
-            f"{info.video_codec}（{info.pix_fmt}）" if info.pix_fmt else info.video_codec or "—"
-        )
+        # 只显示行业通用写法：h264 → H.264。
+        # 像素格式（yuv420p）和采样率（48000 Hz）是给调试用的，
+        # 放在这儿除了让面板显得专业，对用户没有任何用处。
+        f["vcodec"].setText(labels.video_codec_name(info.video_codec))
         f["acodec"].setText(
-            f"{info.audio_codec} · {info.audio_sample_rate} Hz" if info.has_audio else "无音轨"
+            labels.audio_codec_name(info.audio_codec) if info.has_audio else "无音轨"
         )
 
     def show_thumbnail(self, image: QImage | None) -> None:

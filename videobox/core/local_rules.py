@@ -4,13 +4,14 @@
 差别只在于"大脑"：AI 读人话，这里读关键词。
 
 设计原则：
-- 每条规则都要给出人类能看懂的理由（reasons），跟 AI 的输出结构一致
-- 规则覆盖不到时，返回一个稳妥的默认值，而不是报错
+- 每条规则给出的是"这样设会怎样"，不是"参数为什么这么填"。
+  reasons 里不出现 CRF、码率、编码器型号——用户看不懂也管不着
+- 规则覆盖不到时返回一个稳妥的默认值，而不是报错
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from .models import TranscodePlan, VideoInfo
@@ -23,10 +24,6 @@ class Rule:
     build: Callable[[VideoInfo], TranscodePlan]
 
 
-def _reason(param: str, why: str, confidence: float = 0.85) -> dict:
-    return {"param": param, "why": why, "confidence": confidence}
-
-
 def _wechat(info: VideoInfo) -> TranscodePlan:
     return TranscodePlan(
         preset_name="微信朋友圈",
@@ -37,11 +34,11 @@ def _wechat(info: VideoInfo) -> TranscodePlan:
         audio_bitrate_kbps=96,
         target_size_mb=20.0,
         reasons=[
-            _reason("scale", "手机竖屏观看，720p 已足够清晰，且大幅缩短上传等待"),
-            _reason("target_size_mb", "朋友圈视频有体积上限，压到 20MB 内可直接发送"),
-            _reason("audio.bitrate", "语音和人声为主，96k 足够，再高听不出来"),
+            "手机上看着够清晰，上传等待也短",
+            "朋友圈有体积上限，压到 20 MB 以内才能直接发出去",
+            "声音主要是人说话，音质给到这一档就够",
         ],
-        risks=["如果原片是横屏且有小字，720p 下文字可能略糊"],
+        risks=["原片如果是横屏、画面里又有小字，放到 720p 后字可能有点糊"],
         source="local_rules",
     )
 
@@ -55,9 +52,9 @@ def _douyin(info: VideoInfo) -> TranscodePlan:
         scale="1080p",
         audio_bitrate_kbps=128,
         reasons=[
-            _reason("quality", "平台会二次压缩，源头质量要留余量，取较高质量值"),
-            _reason("scale", "1080p 是主流平台推荐的清晰度，再高会被压回去"),
-            _reason("container", "mp4 + faststart 才能被平台正常解析"),
+            "平台收到后还会再压一次，源头留点余量才不至于掉画质",
+            "1080p 是平台推荐的清晰度，传更高也会被压回去",
+            "mp4 各平台都认，直接上传就行",
         ],
         source="local_rules",
     )
@@ -73,11 +70,11 @@ def _email(info: VideoInfo) -> TranscodePlan:
         audio_bitrate_kbps=64,
         target_size_mb=10.0,
         reasons=[
-            _reason("target_size_mb", "常见的附件上限是 10~25MB，先压到 10MB 最稳"),
-            _reason("scale", "邮件场景只求看清内容，480p 可以把体积压到最低"),
-            _reason("quality", "为了提高压缩率放宽质量值，牺牲细节换体积"),
+            "邮箱附件上限通常是 10~25 MB，压到 10 MB 最保险",
+            "邮件只要能看清内容，这个清晰度就够",
+            "细节让一点，换更小的体积",
         ],
-        risks=["有大量文字的画面可能看不清，建议改用网盘链接"],
+        risks=["画面里文字多的话可能看不清，这种情况发网盘链接更合适"],
         source="local_rules",
     )
 
@@ -91,9 +88,9 @@ def _meeting(info: VideoInfo) -> TranscodePlan:
         scale="720p",
         audio_bitrate_kbps=128,
         reasons=[
-            _reason("quality", "录屏画面静止区域多，高质量值不会让体积暴涨，却能保住文字边缘"),
-            _reason("audio.bitrate", "会议以人声为主，给足音频码率比给画面更值"),
-            _reason("scale", "720p 下 PPT 文字仍可辨认，同时体积减半"),
+            "录屏里静止画面多，保住文字边缘也不会让文件变大",
+            "会议主要是人声，声音清楚比画面精细更值得",
+            "这个清晰度下 PPT 上的字仍然认得出来，文件还能小一半",
         ],
         source="local_rules",
     )
@@ -108,11 +105,11 @@ def _archive(info: VideoInfo) -> TranscodePlan:
         scale="原画",
         audio_bitrate_kbps=192,
         reasons=[
-            _reason("quality", "存档优先保画质，取接近视觉无损的质量值"),
-            _reason("scale", "保持原分辨率，任何缩放都是不可逆的信息损失"),
-            _reason("audio.bitrate", "音频给到 192k，避免日后需要重新压制"),
+            "尽量保住画质，接近看不出损失",
+            "不缩小尺寸——缩了以后补不回来",
+            "声音给到最高档，以后不用再处理一遍",
         ],
-        risks=["体积可能接近原始文件，压缩收益有限"],
+        risks=["文件可能和原片差不多大，压缩带来的收益有限"],
         source="local_rules",
     )
 
@@ -126,8 +123,8 @@ def _mobile(info: VideoInfo) -> TranscodePlan:
         scale="720p",
         audio_bitrate_kbps=96,
         reasons=[
-            _reason("scale", "手机屏幕小，720p 与 1080p 观感差异很小"),
-            _reason("quality", "放宽质量值换取更小体积，适合流量受限场景"),
+            "手机屏幕小，这个清晰度和 1080p 看着差不多",
+            "画质让一点换更小的体积，适合流量紧张的时候",
         ],
         source="local_rules",
     )
@@ -142,9 +139,9 @@ def _default(info: VideoInfo) -> TranscodePlan:
         scale="1080p",
         audio_bitrate_kbps=128,
         reasons=[
-            _reason("quality", "26 是画质与体积的常见平衡点，肉眼几乎无差"),
-            _reason("scale", "1080p 兼顾清晰度与兼容性，绝大多数设备都能放"),
-            _reason("container", "mp4 兼容性最好，Windows/手机/网页通吃"),
+            "画质和体积折中，肉眼几乎看不出差别",
+            "绝大多数手机、电脑、电视都能正常播放",
+            "mp4 兼容性最好，微信、网页、剪辑软件都认",
         ],
         source="local_rules",
     )

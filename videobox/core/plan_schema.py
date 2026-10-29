@@ -88,6 +88,43 @@ def _coerce_audio_kbps(raw: Any) -> tuple[int, str | None]:
     return value, None
 
 
+# 有些模型会把"置信度 85%"写进正文里。界面上不展示这种自我评估，
+# 索性在这里剪掉——展示层不该为了兼容模型的坏习惯而去加正则。
+_CONF_NOTE = re.compile(r"[（(]\s*(?:置信度|confidence)[^）)]*[）)]", re.I)
+
+_CJK = r"\u4e00-\u9fa5"
+
+
+def _space_cjk_ascii(text: str) -> str:
+    """中文和数字/字母之间补一个空格。
+
+    「文件压到20MB以内」和「文件压到 20 MB 以内」读起来是两个感受。
+    模型的输出没法指望它每次都排好版，这里统一收一下。
+    """
+    text = re.sub(rf"([{_CJK}])([A-Za-z0-9])", r"\1 \2", text)
+    text = re.sub(rf"([A-Za-z0-9%])([{_CJK}])", r"\1 \2", text)
+    return text
+
+
+def _coerce_reasons(raw: Any, limit: int = 5) -> list[str]:
+    """把模型给的说明统一成「一句人话」的列表。
+
+    兼容两种形状：纯字符串（当前约定）、带 why 字段的对象（旧格式）。
+    """
+    out: list[str] = []
+    for item in raw or []:
+        if isinstance(item, dict):
+            text = str(item.get("why") or item.get("text") or "").strip()
+        else:
+            text = str(item or "").strip()
+        text = _space_cjk_ascii(_CONF_NOTE.sub("", text).strip())
+        if text:
+            out.append(text[:120])
+        if len(out) >= limit:
+            break
+    return out
+
+
 def plan_from_payload(
     data: dict[str, Any],
     available_codecs: list[str],
@@ -167,23 +204,12 @@ def plan_from_payload(
         except (TypeError, ValueError):
             warnings.append(f"帧率 {raw_fps!r} 无法识别，已保持原帧率")
 
-    reasons = []
-    for item in data.get("reasons") or []:
-        if not isinstance(item, dict) or not item.get("why"):
-            continue
-        try:
-            conf = float(item.get("confidence", 0.8))
-        except (TypeError, ValueError):
-            conf = 0.8
-        reasons.append({
-            "param": str(item.get("param", "")),
-            "why": str(item.get("why", "")),
-            "confidence": max(0.0, min(1.0, conf)),
-        })
+    reasons = _coerce_reasons(data.get("reasons"))
+    risks = [str(r).strip() for r in (data.get("risks") or []) if str(r).strip()]
 
-    risks = [str(r) for r in (data.get("risks") or []) if r]
-
-    preset_name = str(data.get("preset") or data.get("preset_name") or "自定义").strip()[:40]
+    preset_name = _space_cjk_ascii(
+        str(data.get("preset") or data.get("preset_name") or "自定义").strip()
+    )[:40]
 
     plan = TranscodePlan(
         preset_name=preset_name or "自定义",

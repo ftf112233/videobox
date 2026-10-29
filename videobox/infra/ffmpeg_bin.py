@@ -52,10 +52,10 @@ class CodecProbe:
     @property
     def label(self) -> str:
         return {
-            "h264_nvenc": "NVIDIA NVENC",
-            "h264_qsv": "Intel QuickSync",
-            "h264_amf": "AMD AMF",
-            "libx264": "CPU 软件编码",
+            "h264_nvenc": "NVIDIA 显卡加速",
+            "h264_qsv": "Intel 核显加速",
+            "h264_amf": "AMD 显卡加速",
+            "libx264": "CPU 编码",
         }.get(self.codec, self.codec)
 
 

@@ -54,7 +54,7 @@ class VideoInfo:
         return format_size(self.size_bytes)
 
     def summary_line(self) -> str:
-        """单行摘要，给 UI 的状态栏用。"""
+        """完整单行摘要。给日志和提示词用——模型需要知道容器与编码。"""
         parts = [self.container or "未知容器", self.video_codec or "无编码"]
         if self.has_video:
             parts.append(self.resolution_label)
@@ -63,6 +63,18 @@ class VideoInfo:
         parts.append(self.duration_label)
         parts.append(self.size_label)
         return " · ".join(p for p in parts if p)
+
+    def friendly_line(self) -> str:
+        """给人看的单行摘要：时长、体积、清晰度。
+
+        状态栏照着 summary_line 显示的话，用户读到的是
+        「mp4 · h264 · 1920×1080 · 30.00fps · 00:11 · 59.0 MB」——
+        他能看懂其中三项，剩下三项只会占地方。
+        """
+        parts = [self.duration_label, self.size_label]
+        if self.has_video:
+            parts.append(self.resolution_label)
+        return " · ".join(p for p in parts if p and p != "--:--")
 
 
 def format_duration(seconds: float) -> str:
@@ -112,6 +124,11 @@ class TranscodePlan:
 
     由 AI 顾问产出，或由本地规则引擎产出，或用户手动调整。
     两种来源共用同一 schema —— 这是"无 Key 时功能仍完整"的技术前提。
+
+    reasons 刻意是「一句话字符串」而不是结构化对象：
+    早期版本每条带 param 名和 confidence，结果界面上渲染成
+    「（quality，置信度 85%）」这种只对写代码的人有意义的东西。
+    用户要的是"这样设会怎样"，不是"你有多确定"。
     """
 
     preset_name: str = "自定义"
@@ -127,7 +144,8 @@ class TranscodePlan:
     audio_bitrate_kbps: int = 128
     target_size_mb: float | None = None
 
-    reasons: list[dict[str, Any]] = field(default_factory=list)
+    # 每条都是用户能读的一句话：会得到什么、要注意什么
+    reasons: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     # "ai" | "local_rules" | "manual"
     source: str = "local_rules"

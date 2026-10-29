@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core import thumb as thumb_mod
+from ..core import labels, thumb as thumb_mod
 from ..core.models import TranscodePlan, VideoInfo
 from ..core.params import build_args, build_preview_command, choose_codec
 from ..core.probe import probe as probe_video
@@ -95,6 +95,9 @@ class MainWindow(QMainWindow):
         self.runner: TranscodeRunner | None = None
         self.worker_refs: list = []
         self.retry_done = False
+        # 顾问请求的序号。默认方案和用户主动提问可能同时在跑，
+        # 只让最后发起的那一次落地，否则慢回来的旧结果会盖掉新的
+        self._advice_token = 0
         self.taskbar = taskbar_mod.TaskbarProgress()
 
         cfg = load_config()
@@ -161,6 +164,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
 
         self.progress_panel = ProgressPanel()
+        self.progress_panel.set_start_enabled(False)
         outer.addWidget(self.progress_panel)
 
         # ---- 信号 ----
@@ -308,6 +312,7 @@ class MainWindow(QMainWindow):
         self.info_panel.reset()
         self.advisor_panel.reset()
         self.progress_panel.set_idle()
+        self.progress_panel.set_start_enabled(False)
         self.progress_panel.show_note(f"正在读取 {Path(path).name}…")
         self.status_label.setText("正在解析视频信息…")
 
@@ -339,20 +344,65 @@ class MainWindow(QMainWindow):
         self.info = info
         self.info_panel.show_info(info)
         self.info_panel.show_thumbnail(image)
-        self.status_label.setText(f"已载入：{Path(path).name}　|　{info.summary_line()}")
+        self.status_label.setText(f"已载入：{Path(path).name}　|　{info.friendly_line()}")
 
         # 载入后立刻给一个默认方案，用户不填需求也能直接转。
-        # 这里必须兜住异常：顾问挂了不能连累"文件已载入"这件已完成的事，
-        # 否则用户会看到一个读出了信息、却完全不能操作的界面。
+        # 必须放后台：AI 模式下这一问要 2~5 秒，在主线程同步调会让窗口冻住，
+        # 用户看到的是"拖进文件之后程序假死了一下"。
+        self.progress_panel.show_note("正在准备一个默认方案…")
+        token = self._next_advice_token()
+        self.worker_refs.append(
+            tasks.submit(
+                self._default_plan_bg, path,
+                on_done=lambda result: self._on_default_plan(path, token, result),
+                on_error=lambda msg: self._on_default_plan_failed(token, msg),
+            )
+        )
+
+    def _default_plan_bg(self, path: str):
+        """后台线程：不带需求问一次，拿一个通用方案。
+
+        顾问挂了不能连累"文件已载入"这件已经完成的事，所以异常在这里收口，
+        回落成一个能直接用的默认计划。
+        """
         try:
-            plan, warnings, used_ai = self.advisor.advise("", info, self.available_codecs)
+            return self.advisor.advise("", self.info, self.available_codecs)
         except Exception as exc:  # noqa: BLE001
             log.exception("默认方案生成失败，使用兜底计划")
-            plan, warnings, used_ai = TranscodePlan(), [f"默认方案生成失败：{exc}"], False
+            return TranscodePlan(), [f"默认方案生成失败：{exc}"], False
+
+    def _next_advice_token(self) -> int:
+        self._advice_token += 1
+        return self._advice_token
+
+    def _stale(self, token: int) -> bool:
+        """这份结果是不是已经被更晚发起的请求取代了。"""
+        return token != self._advice_token
+
+    def _on_default_plan(self, path: str, token: int, payload) -> None:
+        # 等待期间换了文件、或用户已经自己问过一次，这一份结果就过期了
+        if self._stale(token) or not self.info or self.info.path != path:
+            return
+        plan, warnings, used_ai = payload
         self.plan = plan
         self.advisor_panel.apply_plan(plan, warnings, used_ai)
         self._refresh_command()
-        self.progress_panel.show_note("方案已就绪，可以直接开始转码；也可以在右上输入你的用途来调整。")
+        self.progress_panel.set_start_enabled(True)
+        self.progress_panel.show_note(
+            "方案已就绪，可以直接开始转码；也可以在右侧输入你的用途来调整。"
+        )
+
+    def _on_default_plan_failed(self, token: int, message: str) -> None:
+        if self._stale(token) or not self.info:
+            return
+        # 方案没出来也别让"开始转码"一直灰着：用一份兜底计划顶上
+        self.plan = TranscodePlan()
+        self.advisor_panel.apply_plan(
+            self.plan, [f"自动方案生成失败（{message}），已使用安全默认值"], False
+        )
+        self._refresh_command()
+        self.progress_panel.set_start_enabled(True)
+        self.progress_panel.show_note("方案生成失败，已填入安全默认值，可以直接转码。")
 
     # ================= 方案 =================
     def _on_request_summary(self, text: str) -> None:
@@ -361,23 +411,25 @@ class MainWindow(QMainWindow):
             return
         self.advisor_panel.set_busy(True)
         self.status_label.setText("参数顾问思考中…")
+        token = self._next_advice_token()
         self.worker_refs.append(
             tasks.submit(
                 self.advisor.advise, text, self.info, self.available_codecs,
-                on_done=self._on_advice,
+                on_done=lambda payload: self._on_advice(token, payload),
                 on_error=self._on_advice_error,
             )
         )
 
-    def _on_advice(self, payload) -> None:
+    def _on_advice(self, token: int, payload) -> None:
         plan, warnings, used_ai = payload
         self.advisor_panel.set_busy(False)
+        if self._stale(token):
+            log.debug("丢弃过期的顾问结果：%s", plan.preset_name)
+            return
         self.plan = plan
         self.advisor_panel.apply_plan(plan, warnings, used_ai)
         self._refresh_command()
-        self.status_label.setText(
-            f"方案来源：{'AI 顾问' if used_ai else '本地规则'}　|　{plan.preset_name}"
-        )
+        self.status_label.setText(f"方案已更新：{plan.preset_name}")
 
     def _on_advice_error(self, message: str) -> None:
         self.advisor_panel.set_busy(False)
@@ -414,6 +466,23 @@ class MainWindow(QMainWindow):
         self.advisor_panel.show_command(cmd)
         codec = choose_codec(plan.video_codec, self.available_codecs)
         self.advisor_panel.set_codec_text(codec)
+        self.advisor_panel.show_notice(self._size_notice(plan))
+
+    def _size_notice(self, plan: TranscodePlan) -> str:
+        """目标体积和源文件对不上时，提前说清楚会怎么处理。
+
+        用户填了 20 MB，但原片只有 5 MB —— 程序会按画质优先走。
+        什么都不说的话，他拿到一个 4 MB 的文件会以为哪里设错了。
+        """
+        if not plan.target_size_mb or not self.info or not self.info.size_bytes:
+            return ""
+        source_mb = self.info.size_bytes / (1024 * 1024)
+        if plan.target_size_mb >= source_mb:
+            return (
+                f"原片 {source_mb:.1f} MB，比 {plan.target_size_mb:g} MB 的目标还小。"
+                "这次按画质优先处理，不会把文件做大。"
+            )
+        return ""
 
     # ================= 转码 =================
     def _start_transcode(self) -> None:
@@ -442,9 +511,9 @@ class MainWindow(QMainWindow):
             self.progress_panel.show_error(f"参数构造失败：{exc}")
             return
 
-        codec_label = "CPU 软件编码" if codec == "libx264" else "NVIDIA 硬件编码"
+        codec_label = labels.codec_label(codec)
         self.progress_panel.set_running(codec_label)
-        self.status_label.setText(f"转码中… → {out_path}")
+        self.status_label.setText(f"转码中… → {Path(out_path).name}")
         self.taskbar.set_state(int(self.winId()), taskbar_mod.STATE_NORMAL)
         self.taskbar.set_value(int(self.winId()), 0)
 
@@ -480,7 +549,7 @@ class MainWindow(QMainWindow):
 
     def _on_transcode_finished(self, result) -> None:
         codec = result.used_codec
-        codec_label = "CPU 软件编码" if codec == "libx264" else "NVIDIA 硬件编码"
+        codec_label = labels.codec_label(codec)
         self.runner = None
 
         # 硬件编码失败自动降级重试一次——这是真实产品该有的容错

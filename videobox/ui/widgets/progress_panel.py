@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
@@ -71,6 +73,13 @@ class ProgressPanel(QFrame):
         root.addWidget(self.result_label)
 
     # ---------- 对外接口 ----------
+    def set_start_enabled(self, enabled: bool) -> None:
+        """没有视频、没有方案时按钮不可点。
+
+        让按钮灰着，比让他点一下再弹"请先打开一个视频文件"要诚实。
+        """
+        self.start_btn.setEnabled(enabled)
+
     def set_idle(self) -> None:
         self.bar.setValue(0)
         self.percent_label.setText("0%")
@@ -86,7 +95,7 @@ class ProgressPanel(QFrame):
         self.cancel_btn.setEnabled(True)
         self.result_label.setObjectName("Hint")
         self.result_label.setStyleSheet("color: #646A73;")
-        self.result_label.setText(f"正在使用 {codec_label} 转码…")
+        self.result_label.setText(f"正在使用{codec_label}转码…")
         self._restyle(self.result_label)
 
     def update_progress(self, percent: float, eta_text: str, speed: float) -> None:
@@ -110,16 +119,18 @@ class ProgressPanel(QFrame):
             self.percent_label.setText("100%")
             self.eta_label.setText("完成")
             self.result_label.setStyleSheet("color: #00A55B;")
+            name = Path(result.output_path).name
             parts = [
-                f"✓ 转码完成",
+                "✓ 转码完成",
                 f"{_fmt_size(result.input_size_bytes)} → {_fmt_size(result.output_size_bytes)}"
                 f"（{result.size_delta_label}）",
-                f"耗时 {result.elapsed_sec:.1f}s",
-                f"{result.speed:.1f}× 速" if result.speed > 0.01 else "",
+                f"耗时 {result.elapsed_sec:.1f} 秒",
+                f"{result.speed:.1f} 倍速" if result.speed > 0.01 else "",
                 codec_label,
-                result.output_path,
+                f"已保存为 {name}（和原片在同一个文件夹）",
             ]
             self.result_label.setText("　·　".join(p for p in parts if p))
+            self.result_label.setToolTip(result.output_path)
         else:
             self.result_label.setStyleSheet("color: #F53F3F;")
             self.result_label.setText(f"✗ 转码失败：{result.error_message}")
